@@ -208,9 +208,10 @@ public final class Metadata {
         this.lastRefreshMs = now;
         this.lastSuccessfulRefreshMs = now;
         this.version += 1;
-
+//默认值true
         if (topicExpiryEnabled) {
             // Handle expiry of topics from the metadata refresh set.
+            //目前topics是空，不会运行
             for (Iterator<Map.Entry<String, Long>> it = topics.entrySet().iterator(); it.hasNext(); ) {
                 Map.Entry<String, Long> entry = it.next();
                 long expireMs = entry.getValue();
@@ -227,13 +228,15 @@ public final class Metadata {
             listener.onMetadataUpdate(cluster, unavailableTopics);
 
         String previousClusterId = cluster.clusterResource().clusterId();
-
+//默认值false
         if (this.needMetadataForAllTopics) {
             // the listener may change the interested topics, which could cause another metadata refresh.
             // If we have already fetched all topics, however, another fetch should be unnecessary.
             this.needUpdate = false;
             this.cluster = getClusterForCurrentTopics(cluster);
         } else {
+            //直接把刚刚传入的对象给cluster赋值，
+            //初始化的时候，update这个方法没有去服务端拉取数据
             this.cluster = cluster;
         }
 

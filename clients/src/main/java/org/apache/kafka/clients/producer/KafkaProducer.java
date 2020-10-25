@@ -252,7 +252,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer, valueSerializer, interceptorList, reporters);
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG), true, clusterResourceListeners);
+            //规定发送一条消息最大值，超过消息就不能发送过去，默认1M。偏小，生产一般会修改，经验值10M（比如flume收集消息会把多个消息合并成一条）
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            //缓存大小，默认32M
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
             /* check for user defined settings.
@@ -291,7 +293,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             } else {
                 this.requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             }
-
+//TODO 创建一个核心组件
             this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.totalMemorySize,
                     this.compressionType,
@@ -299,10 +301,20 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     retryBackoffMs,
                     metrics,
                     time);
-
+//写producer代码的时候，传参数的时候，传进去了一个broker地址
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
+//看起来像是从服务端拉取数据
             this.metadata.update(Cluster.bootstrap(addresses), Collections.<String>emptySet(), time.milliseconds());
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
+            //TODO 初始化了一个重要的管理网络的组件
+            /**
+             * connections.max.idle.ms 默认值九分钟，超过这个空闲时间就关闭网络
+             * max.in.flight.requests.per.connection 默认5.发送数据是有多个网络连接的，每个网络连接可以忍受producer发给broker消息，然后没有响应的个数。
+             * 某个连接发送了5个还没收到响应，就会阻塞； 另外因为重试机制，所以有可能造成乱序，要保证有序，必须设置为1
+             * reconnect.backoff.ms 重试时间  50ms
+             * send.buffer.bytes socket发送数据缓存区大小，128K
+             * receive.buffer.bytes 接收数据缓存区大小，32K
+             */
             NetworkClient client = new NetworkClient(
                     new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),
                     this.metadata,
@@ -314,6 +326,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     this.requestTimeoutMs,
                     time,
                     true);
+            //retries 重试次数，默认0；生产中一般会设置重试（如网络问题）
+            /**
+             * acks
+             * 0: producer发送到broker之后，就完了，没有返回值，无论成功与否
+             * 1： 成功写入leader partition以后返回响应； 如果还没同步到副本，leader分区就宕机了，还是会丢失数据
+             * -1 ：写入到leader分区之后，还要同步到所有follower分区，才返回响应。才能保证不丢数据
+             * */
+            //这个就是一个线程
             this.sender = new Sender(client,
                     this.metadata,
                     this.accumulator,
@@ -325,6 +345,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     Time.SYSTEM,
                     this.requestTimeoutMs);
             String ioThreadName = "kafka-producer-network-thread" + (clientId.length() > 0 ? " | " + clientId : "");
+            //把业务代码和关于线程的代码隔离开来
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
             this.ioThread.start();
 

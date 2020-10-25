@@ -33,6 +33,7 @@ public class KafkaThread extends Thread {
     }
 
     private void configureThread(final String name, boolean daemon) {
+        //设置为后台线程
         setDaemon(daemon);
         setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             public void uncaughtException(Thread t, Throwable e) {
