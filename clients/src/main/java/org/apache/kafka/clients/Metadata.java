@@ -151,12 +151,18 @@ public final class Metadata {
         }
         long begin = System.currentTimeMillis();
         long remainingWaitMs = maxWaitMs;
+        //如果sender线程更新成功，肯定会累加version，使得大于lastVersion
         while (this.version <= lastVersion) {
+            //如果还有剩余时间
             if (remainingWaitMs != 0)
+                //让当前线程阻塞等待
+                //猜测sender线程更新元数据成功会唤醒这个线程
                 wait(remainingWaitMs);
+            //如果执行到这里，说明要么被唤醒要么到时间
             long elapsed = System.currentTimeMillis() - begin;
             if (elapsed >= maxWaitMs)
                 throw new TimeoutException("Failed to update metadata after " + maxWaitMs + " ms.");
+            //TODO 如果被唤醒但version没有更新（什么情况？），就继续循环。
             remainingWaitMs = maxWaitMs - elapsed;
         }
     }
@@ -211,8 +217,9 @@ public final class Metadata {
 //默认值true
         if (topicExpiryEnabled) {
             // Handle expiry of topics from the metadata refresh set.
-            //目前topics是空，不会运行
+            //目前topics是空，不会运行（第一次进入）
             for (Iterator<Map.Entry<String, Long>> it = topics.entrySet().iterator(); it.hasNext(); ) {
+                //第二次会进入，我们producer send方法
                 Map.Entry<String, Long> entry = it.next();
                 long expireMs = entry.getValue();
                 if (expireMs == TOPIC_EXPIRY_NEEDS_UPDATE)
@@ -247,7 +254,7 @@ public final class Metadata {
                 log.info("Cluster ID: {}", cluster.clusterResource().clusterId());
             clusterResourceListeners.onUpdate(cluster.clusterResource());
         }
-
+//唤醒同步阻塞的wait线程
         notifyAll();
         log.debug("Updated cluster metadata version {} to {}", this.version, this.cluster);
     }
