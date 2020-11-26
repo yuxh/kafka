@@ -45,6 +45,7 @@ public class Producer extends Thread {
         while (true) {
             String messageStr = "Message_" + messageNo;
             long startTime = System.currentTimeMillis();
+            //主线程把业务数据封装到ProducerRecord对象
             if (isAsync) { // Send asynchronously
                 producer.send(new ProducerRecord<>(topic,
                     messageNo,

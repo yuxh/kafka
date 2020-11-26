@@ -51,16 +51,21 @@ public final class Metadata {
     private static final long TOPIC_EXPIRY_NEEDS_UPDATE = -1L;
 
     private final long refreshBackoffMs;
+    //每隔多久更新一次。默认五分钟
     private final long metadataExpireMs;
+    //更新成功一次就加1
     private int version;
     private long lastRefreshMs;
     private long lastSuccessfulRefreshMs;
+    //记录kafka集群的元数据
     private Cluster cluster;
+    //标志是否强制更新，这是触发Sender线程更新元数据的条件之一
     private boolean needUpdate;
     /* Topics with expiry time */
     private final Map<String, Long> topics;
     private final List<Listener> listeners;
     private final ClusterResourceListeners clusterResourceListeners;
+    //是否需要更新全部Topic的元数据，一般情况下，KafkaProducer只维护它用到的元数据，是集群中全部Topic的子集
     private boolean needMetadataForAllTopics;
     private final boolean topicExpiryEnabled;
 
@@ -128,6 +133,7 @@ public final class Metadata {
      * Request an update of the current cluster metadata info, return the current version before the update
      */
     public synchronized int requestUpdate() {
+        //这样，当Sender线程运行时会更新Metadata记录的集群元数据
         this.needUpdate = true;
         return this.version;
     }
@@ -140,6 +146,7 @@ public final class Metadata {
         return this.needUpdate;
     }
 
+    //更新未完成则阻塞等待
     /**
      * Wait for metadata update until the current version is larger than the last version we know of
      */
@@ -149,7 +156,9 @@ public final class Metadata {
         }
         long begin = System.currentTimeMillis();
         long remainingWaitMs = maxWaitMs;
+        //通过版本号比较集群元数据是否更新完成
         while (this.version <= lastVersion) {
+            //下面代码看出，主线程与Sender线程通过wait/notify同步，更新元数据的操作交给Sender线程完成
             if (remainingWaitMs != 0)
                 wait(remainingWaitMs);
             long elapsed = System.currentTimeMillis() - begin;

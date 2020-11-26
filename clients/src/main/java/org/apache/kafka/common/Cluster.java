@@ -35,6 +35,7 @@ public final class Cluster {
     private final Set<String> internalTopics;
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    //这里的分区必须是有leader的分区，上面的partitionsByTopic不一定有，因为某些中间状态如Leader副本宕机而触发的选举过程中，分区不一定有leader
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
     private final Map<Integer, Node> nodesById;
