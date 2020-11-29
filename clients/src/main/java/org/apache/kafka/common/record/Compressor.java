@@ -251,6 +251,7 @@ public class Compressor {
                     return new DataOutputStream(new GZIPOutputStream(buffer, bufferSize));
                 case SNAPPY:
                     try {
+                        //Snappy需要引入额外的依赖包，为了在不使用snappy压缩时减少包，使用了反射的方式动态创建
                         OutputStream stream = (OutputStream) snappyOutputStreamSupplier.get().newInstance(buffer, bufferSize);
                         return new DataOutputStream(stream);
                     } catch (Exception e) {

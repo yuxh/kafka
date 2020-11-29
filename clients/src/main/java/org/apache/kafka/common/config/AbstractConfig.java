@@ -205,6 +205,7 @@ public class AbstractConfig {
             throw new KafkaException(c.getName() + " is not an instance of " + t.getName());
         if (o instanceof Configurable)
             ((Configurable) o).configure(originals());
+        //功能类似 (T)o ，但下面的是在runtime映射
         return t.cast(o);
     }
 

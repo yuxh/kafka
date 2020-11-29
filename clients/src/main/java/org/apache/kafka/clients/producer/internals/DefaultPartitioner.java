@@ -34,9 +34,9 @@ import org.apache.kafka.common.utils.Utils;
  * <li>If no partition or key is present choose a partition in a round-robin fashion
  */
 public class DefaultPartitioner implements Partitioner {
-
+//为了KafkaProducer线程安全，Partitioner也必须是线程安全
     private final AtomicInteger counter = new AtomicInteger(new Random().nextInt());
-
+//由于本类中没有字段需要利用configs进行初始化，因此空实现。本身实际上不需要继承Configurable，只是Partitioner继承了
     public void configure(Map<String, ?> configs) {}
 
     /**
@@ -52,7 +52,9 @@ public class DefaultPartitioner implements Partitioner {
     public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
         int numPartitions = partitions.size();
+        //如果发送消息的时候我们没有指定key(注：很多情况下我们没有指定key)
         if (keyBytes == null) {
+            //不断递增，确保消息不发到同一个分区里
             int nextValue = counter.getAndIncrement();
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (availablePartitions.size() > 0) {
@@ -64,6 +66,7 @@ public class DefaultPartitioner implements Partitioner {
             }
         } else {
             // hash the keyBytes to choose a partition
+            //murmur2是高效率低碰撞的Hash算法
             return Utils.toPositive(Utils.murmur2(keyBytes)) % numPartitions;
         }
     }

@@ -185,6 +185,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * @param properties   The producer configs
      */
     public KafkaProducer(Properties properties) {
+        //properties会保存到AbstractConfig(ProducerConfig的父类)的originals字段
         this(new ProducerConfig(properties), null, null);
     }
 
@@ -222,7 +223,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
+            //使用反射获取一个分区器
             this.partitioner = config.getConfiguredInstance(ProducerConfig.PARTITIONER_CLASS_CONFIG, Partitioner.class);
+            //重要参数，这个参数的默认值是100ms
+            //代表的意思是Producer支持重试，两次重试之间的时间间隔
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
             if (keySerializer == null) {
                 this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
@@ -248,8 +252,16 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.interceptors = interceptorList.isEmpty() ? null : new ProducerInterceptors<>(interceptorList);
 
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer, valueSerializer, interceptorList, reporters);
+            //创建并更新集群元数据；重要参数metadata.max.age.ms，是Producer多久去更新一次Kafka的元数据
+            //默认是5分钟
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG), true, clusterResourceListeners);
+            //重要参数，这个参数开发的时候一般我们要进行设置，它指的是一个请求最大多大
+            //我们也可以理解为代表的意思是一条消息最大允许多大，这个的默认值是1M
+            //1M这个值有些偏小。可以根据大家的公司的情况来，笔者在的公司设置为10M
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            //重要参数
+            //消息在发送在之前都需要缓存起来，这地方指的就是缓存的内存大小
+            //默认是32M，一般情况32M可以满足需求，但是也可以根据公司的情况进行调优
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
             /* check for user defined settings.
@@ -288,7 +300,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             } else {
                 this.requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             }
-//batch.size指定每个RecordBatch的大小，单位是字节
+//对象里面传进去了我们刚刚分析的重要的参数；batch.size指定每个RecordBatch的大小，单位是字节
             this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.totalMemorySize,
                     this.compressionType,
@@ -298,9 +310,23 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     time);
 
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
+            //这段代码看起来想是去获取集群的数据，但是其实代码里没有去获取到元数据
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
-            //producer 网络IO的核心
+            //producer 网络IO的核心，里面传了很多重要的参数
+            //MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION  每个连接允许最多有多个请求没收到响应，默认是5个。
+            //如下的几个参数是跟网络相关的参数，大家可以积累，以后在自己的项目中也可以这么设置
+            //CONNECTIONS_MAX_IDLE_MS_CONFIG 一个网络连接，最多空闲多久，就要把回收掉 默认是9分钟。这个也可以根据情况去设置
+            //RECONNECT_BACKOFF_MS_CONFIG 重试建立连接的时间间隔
+            //SEND_BUFFER_CONFIG soket发送缓冲区的大小，默认是128K
+            // RECEIVE_BUFFER_CONFIG  socket接收缓冲区的大小，默认是32K
+            //上面的有个参数需要引起大家的注意：
+            //MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION 对应的配置参数是max.in.flight.requests.per.connection
+            //这个参数指的是限制Producer客户端在单个连接上能够发送的未响应请求的个数，默认是5个
+            //大家要注意我们的Kafka是有重试机制，那么里面这儿可以允许放5个发送了但是未响应的请求
+            //假如里面的排在前面的消息返回响应说是失败了，然后要重新发送，那么这样的话，消息的顺序就打乱了
+            //所以如果这个值 大于 1 就会有 消息顺序被打乱的风险。
+            //特别关心消息顺序的同学要注意，需要把这个参数设置为1
             NetworkClient client = new NetworkClient(
                     new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),
                     this.metadata,
@@ -310,6 +336,19 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     config.getInt(ProducerConfig.SEND_BUFFER_CONFIG),
                     config.getInt(ProducerConfig.RECEIVE_BUFFER_CONFIG),
                     this.requestTimeoutMs, time);
+            //重要，我们要注意，这个里面把上面创建的client对象传进去了。
+            //从缓冲区里获取数据，然后发送出去
+            //RETRIES_CONFIG对应的参数是retries ，代表的是重试的次数，一般开发的时候我们建议要设置这个值，默认是0，也就是不重试
+            //ACKS_CONFIG acks,这个的值由 0 1 all(-1) 三个数
+            //0 代表 生成者把消息发送给Broker以后，就立马返回。至于有没有写成功也不关心
+            //1 代表 生成者把消息发送给Broker以后，需要等leader partition写入成功以后 返回响应。
+            //1- 代表需要所有的partition都写入成功以后才返回响应。
+            //注：0 1 两个都会有可能造成数据丢失。0 的结果很好想，我只是发送到服务端，然后立马返回
+            //服务端那儿有可能就会写失败。写失败了数据就丢了。1 发送到服务端以后还要等leader partition写入
+            //成功以后才会返回响应，但是大家想如果这个时候leader partition在的broker要是宕机了
+            // 这条数据也就会丢失，其实这个情况是很有可能发生的，因为我们维护集群的时候，有些参数就是需要
+            //重启集群才能生效，重启服务的过程中，肯定就会导致部分leader partition 宕机。
+            //所以如果不允许丢数据的同学，可以重点关注这个参数。
             this.sender = new Sender(client,
                     this.metadata,
                     this.accumulator,
@@ -444,11 +483,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
         TopicPartition tp = null;
         try {
-            //TODO send.1 获取集群信息，底层唤醒Sender线程更新Metadata中保存的Kafka集群元数据;负责触发Kafka集群元数据的更新，并阻塞主线程等待更新完毕
+            //TODO 第一步：阻塞等待获取集群元数据，底层唤醒Sender线程更新Metadata中保存的Kafka集群元数据;负责触发Kafka集群元数据的更新，并阻塞主线程等待更新完毕
             // first make sure the metadata for the topic is available
+            // maxBlockTimeMs 获取元数据最多等待的时间
             ClusterAndWaitTime clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), maxBlockTimeMs);
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
+            //第二步：对key和value进行序列化
             byte[] serializedKey;
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.key());
@@ -465,16 +506,24 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer");
             }
-            //TODO send.2
+            //第三步：根据分区器选择合适的分区
             int partition = partition(record, serializedKey, serializedValue, cluster);
+            //第四步：计算消息的大小
             int serializedSize = Records.LOG_OVERHEAD + Record.recordSize(serializedKey, serializedValue);
+            //确认消息是否超出限制
             ensureValidRecordSize(serializedSize);
+            //第五步：根据元数据获取到topic信息，封装分区对象
             tp = new TopicPartition(record.topic(), partition);
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
             log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             // producer callback will make sure to call both 'callback' and interceptor callback
+            //第六步：设置回调对象
             Callback interceptCallback = this.interceptors == null ? callback : new InterceptorCallback<>(callback, this.interceptors, tp);
+            //第七步：把消息追加到accumulator对象中(32M的一个内存)
+            //然后accumulator把消息封装成一个批次一个批次的去发送
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey, serializedValue, interceptCallback, remainingWaitMs);
+            //消息存入accumulator中，如果一个批次满了，或者是创建了一个新的批次
+            //那么唤醒sender线程，让sender线程开始干活
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 this.sender.wakeup();
@@ -525,13 +574,18 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already and reset expiry
         metadata.add(topic);
+        //找看有没有元数据的缓存，也就是是否曾经拉取过了，但是我们假设现在我们是第一次启动，所以明显是没有的
         Cluster cluster = metadata.fetch();
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
         // Return cached metadata if we have it, and if the record's partition is either undefined
         // or within the known partition range
+        //如果分区信息不等于null，说明当前的元数据里面已经有topic的信息了
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
+            //cluster代表集群元数据信息，0代表获取元数据花的时间。
+            //因为直接获取到了元数据，所以花在元数据的时间就是0了。
             return new ClusterAndWaitTime(cluster, 0);
 
+        //如果再往下执行说明就是要去服务端获取元数据了
         long begin = time.milliseconds();
         long remainingWaitMs = maxWaitMs;
         long elapsed;
@@ -541,8 +595,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         // is stale and the number of partitions for this topic has increased in the meantime.
         do {
             log.trace("Requesting metadata update for topic {}.", topic);
+            //这个操作很重要，做了两个事:
+            //1)把标识符needUpdate 设置为了true，获取元数据的时候需要到这个标识符
+            //2)获取到了当前元数据的版本，每更新一次元数据也会让这个元数据的版本号更新
             int version = metadata.requestUpdate();
+            //TODO 重要
             //唤醒sender线程，由sender线程更新Metadata中保存的Kafka集群元数据
+            //sender线程被初始化并且启动是在我们分析KafkaProducer的构造函数的时候。所以我们等一下回过头来就要去分析sender里面的代码。现在就默认这段代码会让sender线程
+            //去向服务端获取元数据
             sender.wakeup();
             try {
                 //主线程等待Sender线程完成更新。
@@ -573,11 +633,17 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * Validate that the record size isn't too large
      */
     private void ensureValidRecordSize(int size) {
+        //maxRequestSize 默认大小是1M
+        //也就是说如果消息的大小超过1M就会报异常，1M偏小
+        //建议这个值生产中调大
         if (size > this.maxRequestSize)
             throw new RecordTooLargeException("The message is " + size +
                                               " bytes when serialized which is larger than the maximum request size you have configured with the " +
                                               ProducerConfig.MAX_REQUEST_SIZE_CONFIG +
                                               " configuration.");
+        //如果大小超过32M也报异常
+        //消息创建出来以后不会立马直接发送给服务端，而是进到RecordAccumulator的缓存里
+        //totalMemrory指的就是这个缓存的大小，默认是32M
         if (size > this.totalMemorySize)
             throw new RecordTooLargeException("The message is " + size +
                                               " bytes when serialized which is larger than the total memory buffer you have configured with the " +
@@ -750,6 +816,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * calls configured partitioner class to compute the partition.
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey, byte[] serializedValue, Cluster cluster) {
+        //如果当前消息已经分配了分区号，那么就直接用这个分区号就行
+        //如果当前的消息还没有分区号，那么就会调用Partitioner的计算分区的算法
+        //正常代码进来消息是没有分区号的。
         Integer partition = record.partition();
         return partition != null ?
                 partition :

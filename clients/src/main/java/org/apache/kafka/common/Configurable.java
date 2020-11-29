@@ -22,7 +22,7 @@ import java.util.Map;
  * A Mix-in style interface for classes that are instantiated by reflection and need to take configuration parameters
  */
 public interface Configurable {
-
+//封装了对象初始化过程且只有一个参数（originals字段）
     /**
      * Configure this class with the given key-value pairs
      */

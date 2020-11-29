@@ -62,6 +62,7 @@ public final class RecordAccumulator {
     private volatile boolean closed;
     private final AtomicInteger flushesInProgress;
     private final AtomicInteger appendsInProgress;
+    //每个RecordBatch底层ByteBuffer 的大小
     private final int batchSize;
     private final CompressionType compression;
     private final long lingerMs;
@@ -166,34 +167,71 @@ public final class RecordAccumulator {
         appendsInProgress.incrementAndGet();
         try {
             // check if we have an in-progress batch
+            //TODO 步骤一：根据当前分区获取当前分区存的批次消息的队列
+            /**
+             * 因为Kafka发送消息不是一条消息一条消息发送的，而是一个批次一个批次发送的，当满足一个
+             * 批次了，就把批次存入到当前分区对应的队列里面去，后面由sender线程从队列里面取批次发送到服务端。
+             *获取当前分区对应的队列信息会有两种可能：
+             * 状况一：如果当前分区之前就有创建好了队列了，那么就直接获取到一个对应的队列
+             * 状况二：如果之前这个分区对应的队列信息不存在那么此次就获取到一个空的队列
+             *
+             * 我们是场景驱动分析，这个时候是第一次进来，所以之前是没有队列的
+             * 这儿会创建出来一个空的队列
+             */
             Deque<RecordBatch> dq = getOrCreateDeque(tp);
+            /**
+             * 首先我们要知道代码肯定是并发运行的，
+             * 这儿为了保证并发安全加锁了。但是大家放心这儿还是依然能保证高性能，
+             * 因为里面的代码是对内存进行操作。
+             */
+            //这种写法是对dq对象加锁，也就是说针对同一个队列（同一分区）只能有一个线程进入
+            //dq是ArrayDeque（非线程安全）
             synchronized (dq) {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
+                //TODO 步骤二
+                //尝试往内存里面添加消息，不过一开始是不成功的
+                //状况一：第一次进来因为没有batch,只是有了队列，数据需要存储在batch（需要分配内存），而我们没有分配内存
+                //所以appendResult 为 null
+                //状况二：如果是后几次进来，但是发现把批次写满了
+                //那么这儿的返回值同样也是null
+                //状况三：如果已经前面已经有创建好了的batch,并且还没写满
+                //那么直接写进去。appendResult就不等于null
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null)
                     return appendResult;
             }
 
             // we don't have an in-progress record batch try to allocate a new batch
+            //TODO 步骤三 计算应该要分配一个批次内存的大小
+            //在batchSize 和一条消息的大小之间取最大值，作为这个内存的大小。batchSize默认是16K
+            //TODO 其实这儿也给我们一个启示
+            //如果一条消息大小本来就差不多16K这么大，或者是比16K还要大（一条消息就是一个批次，那消息就是一条一条被发送出去的）
+            //那么这个批次的设计就没有意义了，所以如果消息较大时
+            //把Kafka的批次的大小也调大
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
+            //TODO 步骤四 分配内存
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
-
+                //TODO 步骤五 尝试往内存里面添加消息 double_check
+                //第一次执行到这儿仍然失败，虽然已经分配了内存，但还没创建批次
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
+                    //TODO  把多余内存放到内存池
                     free.deallocate(buffer);
                     return appendResult;
                 }
+                //TODO 步骤六 根据内存大小封装batch
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());
+                //尝试往batch写数据，这个时候会执行成功
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
-
+                //TODO 步骤七 把batch存入该分区对应的队列的队尾
                 dq.addLast(batch);
                 incomplete.add(batch);
                 return new RecordAppendResult(future, dq.size() > 1 || batch.records.isFull(), true);
@@ -208,7 +246,9 @@ public final class RecordAccumulator {
      * resources (like compression streams buffers).
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
+        //首先获取队列里的一个批次
         RecordBatch last = deque.peekLast();
+        //第一次进来是没有批次的
         if (last != null) {
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());
             if (future == null)

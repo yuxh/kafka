@@ -160,10 +160,13 @@ public final class Metadata {
         while (this.version <= lastVersion) {
             //下面代码看出，主线程与Sender线程通过wait/notify同步，更新元数据的操作交给Sender线程完成
             if (remainingWaitMs != 0)
+                //其实我们可以大胆地猜测一下，如果sender线程那儿获取到了元数据
+                //肯定会主动唤醒这个wait的
                 wait(remainingWaitMs);
             long elapsed = System.currentTimeMillis() - begin;
             if (elapsed >= maxWaitMs)
                 throw new TimeoutException("Failed to update metadata after " + maxWaitMs + " ms.");
+            //TODO 如果被唤醒，但版本又未更新成功，是什么原因？估计查看sender能明白
             remainingWaitMs = maxWaitMs - elapsed;
         }
     }

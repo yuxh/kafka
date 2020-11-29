@@ -25,7 +25,7 @@ import org.apache.kafka.common.Cluster;
  */
 
 public interface Partitioner extends Configurable {
-
+//这么设计还打算用value来分区？
     /**
      * Compute the partition for the given record.
      *
