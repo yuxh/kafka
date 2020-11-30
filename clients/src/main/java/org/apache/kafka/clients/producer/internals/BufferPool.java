@@ -42,12 +42,14 @@ import org.apache.kafka.common.utils.Time;
  * </ol>
  */
 public final class BufferPool {
-
+//整个pool的大小
     private final long totalMemory;
     private final int poolableSize;
     private final ReentrantLock lock;
+    //池子就是一个队列，放的就是一个一个的内存块
     private final Deque<ByteBuffer> free;
     private final Deque<Condition> waiters;
+    //可用空间的大小= totalMemory - free列中全部ByteBuffer的大小
     private long availableMemory;
     private final Metrics metrics;
     private final Time time;
@@ -90,6 +92,7 @@ public final class BufferPool {
      *         forever)
      */
     public ByteBuffer allocate(int size, long maxTimeToBlockMs) throws InterruptedException {
+        //想要申请的内存大小如果大于32M
         if (size > this.totalMemory)
             throw new IllegalArgumentException("Attempt to allocate " + size
                                                + " bytes, but there is a hard limit of "
@@ -98,13 +101,19 @@ public final class BufferPool {
 
         this.lock.lock();
         try {
+            //poolableSize代表一个批次的大小，默认情况下一个批次的大小是16k
+            //如果这次申请的批次大小等于 我们设定的一个批次的大小；并且内存池不为空
+            //那么直接从内存池获取
+            //第一次进来，内存池里面没有内存
             // check if we have a free buffer of the right size pooled
             if (size == poolableSize && !this.free.isEmpty())
                 return this.free.pollFirst();
 
             // now check if the request is immediately satisfiable with the
             // memory on hand or if we need to block
+            //内存个数*批次大小 == free的大小
             int freeListSize = this.free.size() * this.poolableSize;
+            //availableMemory+ freeListSize =目前可用的总内存； 内存申请的时候先从availableMemory获取，还回来的时候进入free
             if (this.availableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request
@@ -113,12 +122,19 @@ public final class BufferPool {
                 lock.unlock();
                 return ByteBuffer.allocate(size);
             } else {
+                //还有一种情况，整个内存池只有10k的内存，但是我们申请32k（批次就是16k，但一条消息是32k，得到当前批次就是32k）
                 // we are out of memory and will have to block
+                //统计分配的内存
                 int accumulated = 0;
                 ByteBuffer buffer = null;
                 Condition moreMemory = this.lock.newCondition();
                 long remainingTimeToBlockNs = TimeUnit.MILLISECONDS.toNanos(maxTimeToBlockMs);
+                //等待别人释放内存
                 this.waiters.addLast(moreMemory);
+                /*
+                总的分配思路，可能一下分配不了这么大的内存，但是可以先有一点分配一点
+                 */
+                //如果分配给我的内存大小没有申请的大
                 // loop over and over until we have a buffer or have reserved
                 // enough memory to allocate one
                 while (accumulated < size) {
@@ -126,6 +142,8 @@ public final class BufferPool {
                     long timeNs;
                     boolean waitingTimeElapsed;
                     try {
+                        //等待别人释放内存
+                        //猜测别人释放内存的时候，可能会唤醒这里的代码
                         waitingTimeElapsed = !moreMemory.await(remainingTimeToBlockNs, TimeUnit.NANOSECONDS);
                     } catch (InterruptedException e) {
                         this.waiters.remove(moreMemory);
@@ -142,6 +160,7 @@ public final class BufferPool {
                     }
 
                     remainingTimeToBlockNs -= timeNs;
+                    //如果内存池有数据了，并且申请的内存大小等于设置的批次的大小
                     // check if we can satisfy this request from the free list,
                     // otherwise allocate memory
                     if (accumulated == 0 && size == this.poolableSize && !this.free.isEmpty()) {
@@ -152,6 +171,7 @@ public final class BufferPool {
                         // we'll need to allocate memory, but we may only get
                         // part of what we need on this iteration
                         freeUp(size - accumulated);
+                        //可以给你分配的内存
                         int got = (int) Math.min(size - accumulated, this.availableMemory);
                         this.availableMemory -= got;
                         accumulated += got;
