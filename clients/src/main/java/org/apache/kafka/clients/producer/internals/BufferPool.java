@@ -45,9 +45,11 @@ public final class BufferPool {
 //整个pool的大小
     private final long totalMemory;
     private final int poolableSize;
+    //多线程并发分配和回收ByteBuffer，所以使用锁控制并发，保证线程安全
     private final ReentrantLock lock;
-    //池子就是一个队列，放的就是一个一个的内存块
+    //ArrayDeque队列，放的就是一个一个的内存块;缓存指定大小的ByteBuffer对象
     private final Deque<ByteBuffer> free;
+    //记录因申请不到空间而阻塞的线程，实际记录的是阻塞线程对应的Condition对象
     private final Deque<Condition> waiters;
     //可用空间的大小= totalMemory - free列中全部ByteBuffer的大小
     private long availableMemory;
@@ -117,11 +119,13 @@ public final class BufferPool {
             if (this.availableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request
+                //为了让availableMemory > size,freeUp会不断从free中释放bytebuffer，直到availableMemory满足这次申请
                 freeUp(size);
                 this.availableMemory -= size;
                 lock.unlock();
+                //没有使用free队列中的buffer，而是直接分配size大小的HeapByteBuffer
                 return ByteBuffer.allocate(size);
-            } else {
+            } else {//没有足够空间只有阻塞
                 //还有一种情况，整个内存池只有10k的内存，但是我们申请32k（批次就是16k，但一条消息是32k，得到当前批次就是32k）
                 // we are out of memory and will have to block
                 //统计分配的内存
@@ -134,7 +138,7 @@ public final class BufferPool {
                 /*
                 总的分配思路，可能一下分配不了这么大的内存，但是可以先有一点分配一点
                  */
-                //如果分配给我的内存大小没有申请的大
+                //如果分配给我的内存大小没有申请的大,循环等待
                 // loop over and over until we have a buffer or have reserved
                 // enough memory to allocate one
                 while (accumulated < size) {
@@ -151,6 +155,7 @@ public final class BufferPool {
                     } finally {
                         long endWaitNs = time.nanoseconds();
                         timeNs = Math.max(0L, endWaitNs - startWaitNs);
+                        //统计阻塞时间
                         this.waitTime.record(timeNs, time.milliseconds());
                     }
 
@@ -230,6 +235,7 @@ public final class BufferPool {
             } else {
                 this.availableMemory += size;
             }
+            //唤醒一个因空间不足而阻塞的线程
             Condition moreMem = this.waiters.peekFirst();
             if (moreMem != null)
                 moreMem.signal();

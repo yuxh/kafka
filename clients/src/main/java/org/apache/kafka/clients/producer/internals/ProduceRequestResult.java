@@ -47,7 +47,7 @@ public final class ProduceRequestResult {
         this.topicPartition = topicPartition;
         this.baseOffset = baseOffset;
         this.error = error;
-        this.latch.countDown();
+        this.latavach.countDown();
     }
 
     /**

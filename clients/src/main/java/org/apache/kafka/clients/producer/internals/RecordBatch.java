@@ -29,22 +29,32 @@ import org.slf4j.LoggerFactory;
  * 
  * This class is not thread safe and external synchronization must be used when modifying it
  */
+//封装了MemoryRecords对象，还封装了很多控制信息和统计信息
 public final class RecordBatch {
 
     private static final Logger log = LoggerFactory.getLogger(RecordBatch.class);
-
+//保存的Record个数
     public int recordCount = 0;
+    //最大Record的字节数
     public int maxRecordSize = 0;
+    //尝试发送当前RecordBatch的次数
     public volatile int attempts = 0;
     public final long createdMs;
     public long drainedMs;
+    //最后一次尝试发送的时间戳
     public long lastAttemptMs;
+    //指向用来发送数据的MemoryRecords对象
     public final MemoryRecords records;
+    //当前RecordBatch中缓存的消息都会发送给此topicPartition
     public final TopicPartition topicPartition;
+    //标识RecordBatch状态的Future对象。
     public final ProduceRequestResult produceFuture;
+    //最后一次向 RecordBatch追加消息的时间戳
     public long lastAppendTime;
     private final List<Thunk> thunks;
+    //用来记录某消息在RecordBatch中的偏移量
     private long offsetCounter = 0L;
+    //是否正在重试。如果RecordBatch 中的数据发送失败，则会重新尝试发送
     private boolean retry;
 
     public RecordBatch(TopicPartition tp, MemoryRecords records, long now) {
@@ -64,16 +74,20 @@ public final class RecordBatch {
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, long now) {
+        //估算剩余空间不足，不是准确值
         if (!this.records.hasRoomFor(key, value)) {
             return null;
         } else {
+            //向MemoryRecords添加数据。注意offsetCounter是在RecordBatch中的偏移量
             long checksum = this.records.append(offsetCounter++, timestamp, key, value);
+            //更新统计信息
             this.maxRecordSize = Math.max(this.maxRecordSize, Record.recordSize(key, value));
             this.lastAppendTime = now;
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
                                                                    timestamp, checksum,
                                                                    key == null ? -1 : key.length,
                                                                    value == null ? -1 : value.length);
+            //将用户自定义callback和FutureRecordMetadata封装成Thunk，保存到thunks集合
             if (callback != null)
                 thunks.add(new Thunk(callback, future));
             this.recordCount++;

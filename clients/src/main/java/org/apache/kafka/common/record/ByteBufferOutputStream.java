@@ -18,7 +18,7 @@ package org.apache.kafka.common.record;
 
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
-
+//添加自动扩容的功能
 /**
  * A byte buffer backed output outputStream
  */
