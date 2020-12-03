@@ -31,12 +31,14 @@ public final class ProduceRequestResult {
 
     private final CountDownLatch latch = new CountDownLatch(1);
     private volatile TopicPartition topicPartition;
+    //服务端为此RecordBatch中第一条消息分配的offset，这样每个消息可以根据此offset以及自身在此RecordBatch中的相对偏移量，计算出在服务端分区中的偏移量
     private volatile long baseOffset = -1L;
     private volatile RuntimeException error;
 
     public ProduceRequestResult() {
     }
 
+    //当RecordBatch中全部消息被正常响应、或超时、或关闭生产者时，会调用done,将produceFuture标记为完成并通过error字段区分异常完成和正常完成
     /**
      * Mark this request as complete and unblock any threads waiting on its completion.
      * @param topicPartition The topic and partition to which this record set was sent was sent
@@ -47,7 +49,8 @@ public final class ProduceRequestResult {
         this.topicPartition = topicPartition;
         this.baseOffset = baseOffset;
         this.error = error;
-        this.latavach.countDown();
+        //会唤醒阻塞在CountDownLatch对象的await方法的线程（这些线程通过ProduceRequestResult的await等待）
+        this.latch.countDown();
     }
 
     /**

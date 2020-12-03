@@ -51,6 +51,7 @@ public final class RecordBatch {
     public final ProduceRequestResult produceFuture;
     //最后一次向 RecordBatch追加消息的时间戳
     public long lastAppendTime;
+    //可理解为消息的回调对象队列
     private final List<Thunk> thunks;
     //用来记录某消息在RecordBatch中的偏移量
     private long offsetCounter = 0L;
@@ -95,6 +96,7 @@ public final class RecordBatch {
         }
     }
 
+//当RecordBatch成功收到正常响应、或超时、或关闭生产者时，会调用done
     /**
      * Complete the request
      * 
@@ -107,11 +109,13 @@ public final class RecordBatch {
                   topicPartition,
                   baseOffset,
                   exception);
-        // execute callbacks
+        // execute callbacks 循环每个消息
         for (int i = 0; i < this.thunks.size(); i++) {
             try {
                 Thunk thunk = this.thunks.get(i);
+                //正常处理完成
                 if (exception == null) {
+                    //将服务端返回的信息（offset和timestamp）和消息的其他信息封装
                     // If the timestamp returned by server is NoTimestamp, that means CreateTime is used. Otherwise LogAppendTime is used.
                     RecordMetadata metadata = new RecordMetadata(this.topicPartition,  baseOffset, thunk.future.relativeOffset(),
                                                                  timestamp == Record.NO_TIMESTAMP ? thunk.future.timestamp() : timestamp,
@@ -119,6 +123,7 @@ public final class RecordBatch {
                                                                  thunk.future.serializedKeySize(),
                                                                  thunk.future.serializedValueSize());
                     thunk.callback.onCompletion(metadata, null);
+                    //处理过程出现异常，第一个参数为null
                 } else {
                     thunk.callback.onCompletion(null, exception);
                 }
@@ -126,6 +131,7 @@ public final class RecordBatch {
                 log.error("Error executing user-provided callback on message for topic-partition {}:", topicPartition, e);
             }
         }
+        //标记整个RecordBatch都已经处理完成
         this.produceFuture.done(topicPartition, baseOffset, exception);
     }
 
@@ -133,6 +139,7 @@ public final class RecordBatch {
      * A callback and the associated FutureRecordMetadata argument to pass to it.
      */
     final private static class Thunk {
+        //指向对应消息的callback对象
         final Callback callback;
         final FutureRecordMetadata future;
 
@@ -146,7 +153,7 @@ public final class RecordBatch {
     public String toString() {
         return "RecordBatch(topicPartition=" + topicPartition + ", recordCount=" + recordCount + ")";
     }
-
+//调用done并抛出timeoutException，标记整个RecordBatch中的消息过期
     /**
      * A batch whose metadata is not available should be expired if one of the following is true:
      * <ol>
