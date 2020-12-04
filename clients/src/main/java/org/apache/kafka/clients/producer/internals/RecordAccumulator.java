@@ -70,9 +70,11 @@ public final class RecordAccumulator {
     private final BufferPool free;
     private final Time time;
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
+    //未发送完成的RecordBatch集合，底层通过Set<RecordBatch> 实现
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     private final Set<TopicPartition> muted;
+    //使用drain方法批量导出RecordBatch的时候，为了防止饥饿，使用drainIndex记录上次发送停止的的位置，下次继续从此位置开始发送
     private int drainIndex;
 
     /**
@@ -315,6 +317,7 @@ public final class RecordAccumulator {
         }
     }
 
+    //获取集群中符合发送消息条件的节点集合。这些条件是站在RecordBatch角度对集群中的node进行筛选
     /**
      * Get a list of nodes whose partitions are ready to be sent, and the earliest time at which any non-sendable
      * partition will be ready; Also return the flag for whether there are any unknown leaders for the accumulated
@@ -337,10 +340,12 @@ public final class RecordAccumulator {
      * </ol>
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
+        //记录可向哪些节点发送消息
         Set<Node> readyNodes = new HashSet<>();
+        //记录下次需要调用ready的时间间隔
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
-
+//条件3：是否有线程在阻塞等待BufferPool 释放空间（即BufferPool的空间耗尽了）
         boolean exhausted = this.free.queued() > 0;
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
@@ -348,6 +353,7 @@ public final class RecordAccumulator {
 
             Node leader = cluster.leaderFor(part);
             synchronized (deque) {
+                //leader找不到，肯定不能发送消息
                 if (leader == null && !deque.isEmpty()) {
                     // This is a partition for which leader is not known, but messages are available to send.
                     // Note that entries are currently not removed from batches when deque is empty.
@@ -359,6 +365,7 @@ public final class RecordAccumulator {
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
+                        //条件1：Deque中有多个RecordBatch或第一个RecordBatch已经满了
                         boolean full = deque.size() > 1 || batch.records.isFull();
                         boolean expired = waitedTimeMs >= timeToWaitMs;
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
@@ -392,6 +399,9 @@ public final class RecordAccumulator {
         return false;
     }
 
+    //根据最终要发送消息的Node集合，获取要发送的消息。也是由sender线程调用。
+    //核心逻辑：将RecordAccumulator记录的TopicPartition->RecordBatch集合的映射，转换成NodeId->RecordBatch集合的映射
+
     /**
      * Drain all the data for the given nodes and collate them into a list of batches that will fit within the specified
      * size on a per-node basis. This method attempts to avoid choosing the same topic-node over and over.
@@ -408,10 +418,12 @@ public final class RecordAccumulator {
                                                  long now) {
         if (nodes.isEmpty())
             return Collections.emptyMap();
-
+//转换后的结果
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
+        //遍历指定的ready node集合
         for (Node node : nodes) {
             int size = 0;
+            //当前node上的分区集合
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
             List<RecordBatch> ready = new ArrayList<>();
             /* to make starvation less likely this loop doesn't start at 0 */
