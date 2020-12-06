@@ -27,14 +27,17 @@ import java.nio.channels.SelectionKey;
 import java.security.Principal;
 
 import org.apache.kafka.common.utils.Utils;
-
+//SocketChannel上的又一层封装
 public class KafkaChannel {
     //一个broker对应一个KafkaChannel
     private final String id;
+    //封装SocketChannel和SelectKey。根据网络协议不同提供不同的子类，对KafkaChannel提供统一接口（策略模式）
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;
     private final int maxReceiveSize;
+    //写时用的缓存
     private NetworkReceive receive;
+    //读时用的缓存
     private Send send;
 
     public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize) throws IOException {

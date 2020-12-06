@@ -82,7 +82,7 @@ public class Selector implements Selectable {
 
     public static final long NO_IDLE_TIMEOUT_MS = -1;
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
-//负责网络的建立，发送请求，处理实际的网络IO，最核心的一个组件
+//负责网络的建立，发送请求，处理实际的网络IO，最核心的一个组件(监听网络IO事件)
     private final java.nio.channels.Selector nioSelector;
     //broker和KafkaChannel的映射
     private final Map<String, KafkaChannel> channels;
@@ -95,11 +95,13 @@ public class Selector implements Selectable {
     //没有建立连接的主机
     private final List<String> disconnected;
     private final List<String> connected;
+    //记录向哪些Node发送的请求失败了
     private final List<String> failedSends;
     private final Time time;
     private final SelectorMetrics sensors;
     private final String metricGrpPrefix;
     private final Map<String, String> metricTags;
+    //用于创建KafkaChannel的Builder。根据不同的配置创建不同的TransportLayer的子类，然后创建KafkaChannel
     private final ChannelBuilder channelBuilder;
     private final int maxReceiveSize;
     private final boolean metricsPerConnection;
