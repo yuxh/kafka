@@ -171,10 +171,13 @@ public class Sender implements Runnable {
      *            The current POSIX time in milliseconds
      */
     void run(long now) {
+        //1:获取元数据；第一次进来时，还没有获取到元数据
         Cluster cluster = metadata.fetch();
+        //2:判断那些分区有数据可以发送，获取到这个分区的leader 分区对应的broker
+        //哪些broker上面需要我们去发送消息？
         // get the list of partitions with data ready to send
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
-
+        //3:还没有拉取到元数据的topic,如果上面的ReadyCheckResult标志有，就调用requestUpdate标记需要更新Kafka的集群信息
         // if there are any partitions whose leaders are not known yet, force metadata update
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
@@ -184,18 +187,21 @@ public class Sender implements Runnable {
                 this.metadata.add(topic);
             this.metadata.requestUpdate();
         }
-
+//4:根据readyNodes集合，循环调用NetworkClient.ready,目的是检查网络IO方面是否满足发送消息的条件，不符合条件的Node将会从readyNodes集合中删除。
         // remove any nodes we aren't ready to send to
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
             if (!this.client.ready(node, now)) {
+                //移除result里面要发送消息的主机
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
             }
         }
-
+        //5：根据4处理后的readyNode集合，调用drain方法获取待发送的消息集合
+        //可能要发送的分区有多个，很有可能一些分区的leader分区是在同一台服务器上面。
+        //就把同一个broker的分区放在一组，如 broker0 ->分区1、2
         // create produce requests
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
@@ -208,7 +214,7 @@ public class Sender implements Runnable {
                     this.accumulator.mutePartition(batch.topicPartition);
             }
         }
-
+//6：处理RA中的超时信息
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)
@@ -229,6 +235,7 @@ public class Sender implements Runnable {
         for (ClientRequest request : requests)
             client.send(request, now);
 
+        //真正执行网络操作的都是这个；包括发送请求、接收响应
         // if some partitions are already ready to be sent, the select time would be 0;
         // otherwise if some partition already has some data accumulated but not ready yet,
         // the select time will be the time difference between now and its linger expiry time;

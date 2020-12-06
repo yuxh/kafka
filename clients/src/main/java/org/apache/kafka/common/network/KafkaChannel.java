@@ -29,6 +29,7 @@ import java.security.Principal;
 import org.apache.kafka.common.utils.Utils;
 
 public class KafkaChannel {
+    //一个broker对应一个KafkaChannel
     private final String id;
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;

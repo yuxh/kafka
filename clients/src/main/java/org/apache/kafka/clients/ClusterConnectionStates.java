@@ -37,6 +37,7 @@ final class ClusterConnectionStates {
      */
     public boolean canConnect(String id, long now) {
         NodeConnectionState state = nodeState.get(id);
+        //从来没有连结过
         if (state == null)
             return true;
         else

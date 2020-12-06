@@ -347,6 +347,7 @@ public final class RecordAccumulator {
         Set<String> unknownLeaderTopics = new HashSet<>();
 //条件3：是否有线程在阻塞等待BufferPool 释放空间（即BufferPool的空间耗尽了）
         boolean exhausted = this.free.queued() > 0;
+        //遍历所有分区
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
             Deque<RecordBatch> deque = entry.getValue();
@@ -361,11 +362,21 @@ public final class RecordAccumulator {
                 } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
+                        /*batch.attempts 重试次数
+                         batch.lastAttemptMs 上一次重试时间
+                         retryBackoffMs 重试时间间隔
+                            backingOff 重新发送数据的时间到了
+                         */
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
+                        //这个批次已经等了多久了
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
+                        //如果是第一次发送数据，之前就没有发送过数据，就没有重试一说
+                        //timeToWaitMs=lingerMs 消息如果一直凑不齐一个批次，也会限定一个时间lingerMs 默认0（来一条发一条），不合适，一般会配置，假设100ms
+
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        //最多等多久-已经等多久=还要等多久
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
-                        //条件1：Deque中有多个RecordBatch或第一个RecordBatch已经满了
+                        //条件1：Deque中有多个RecordBatch（第一个批次肯定写满了）或第一个RecordBatch已经满了
                         boolean full = deque.size() > 1 || batch.records.isFull();
                         boolean expired = waitedTimeMs >= timeToWaitMs;
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();

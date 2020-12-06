@@ -153,7 +153,7 @@ public class NetworkClient implements KafkaClient {
 
         if (isReady(node, now))
             return true;
-
+//  判断是否可以尝试去建立网络
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
             initiateConnect(node, now);
@@ -212,9 +212,17 @@ public class NetworkClient implements KafkaClient {
     public boolean isReady(Node node, long now) {
         // if we need to update our metadata now declare all requests unready to make metadata requests first
         // priority
+        //!metadataUpdater.isUpdateDue(now) 我们要发送写数据请求的时候，不能是正在更新元数据的时候
         return !metadataUpdater.isUpdateDue(now) && canSendRequest(node.idString());
     }
 
+    /*
+    connectionStates.isConnected(node)： 生产者缓存多个连接（和broker数一样），判断缓存里面是否已经把连接建立好了
+    selector.isChannelReady(node)：对java nio封装 selector绑定了多个KafkaChannel（java socketchannel）
+    一个KafkaChannel代表一个连接
+     inFlightRequests.canSendMore(node)： 一个往broker发送消息的连接，最多能容忍5个（默认值）消息发送出去，但没收到响应
+
+     */
     /**
      * Are we connected and ready and able to send more requests to the given connection?
      *

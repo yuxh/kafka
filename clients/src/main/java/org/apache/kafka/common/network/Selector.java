@@ -75,17 +75,24 @@ import org.slf4j.LoggerFactory;
  *
  * This class is not thread safe!
  */
+/*
+基于Java nio里的Selector封装的
+ */
 public class Selector implements Selectable {
 
     public static final long NO_IDLE_TIMEOUT_MS = -1;
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
-
+//负责网络的建立，发送请求，处理实际的网络IO，最核心的一个组件
     private final java.nio.channels.Selector nioSelector;
+    //broker和KafkaChannel的映射
     private final Map<String, KafkaChannel> channels;
     private final List<Send> completedSends;
+    //已经接收到的，并且也已经处理了响应
     private final List<NetworkReceive> completedReceives;
+    //每个连接的响应，已经接收到的但还没来得及处理的响应
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
     private final Set<SelectionKey> immediatelyConnectedKeys;
+    //没有建立连接的主机
     private final List<String> disconnected;
     private final List<String> connected;
     private final List<String> failedSends;
@@ -167,10 +174,12 @@ public class Selector implements Selectable {
         socketChannel.configureBlocking(false);
         Socket socket = socketChannel.socket();
         socket.setKeepAlive(true);
+        //网络参数，有一些默认值。
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
         if (receiveBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setReceiveBufferSize(receiveBufferSize);
+        //默认false，会开启Nagle算法，会把网络中的一些小的数据包收集起来，组合成大的数据包再发送，因为Kafka有数据包就是比较小，因此不合适
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
@@ -184,6 +193,7 @@ public class Selector implements Selectable {
         }
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
+        //key和KafkaChannel关联起来，后面使用起来比较方便
         key.attach(channel);
         this.channels.put(id, channel);
 
