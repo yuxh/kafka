@@ -185,6 +185,7 @@ public class Selector implements Selectable {
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
+            //因为是非阻塞模式，所以socketChannel.connect 发起一个连接，在连接正式建立以前就可能返回，后面通过finishConnect确认是否真正建立
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
