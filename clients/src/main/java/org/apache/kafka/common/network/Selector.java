@@ -322,6 +322,7 @@ public class Selector implements Selectable {
         while (iterator.hasNext()) {
             SelectionKey key = iterator.next();
             iterator.remove();
+            //创建连接时，将KafkaChannel注册到key上，就是为了在这里获取
             KafkaChannel channel = channel(key);
 
             // register all per-connection metrics at once
