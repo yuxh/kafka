@@ -204,6 +204,7 @@ public class Selector implements Selectable {
             // OP_CONNECT won't trigger for immediately connected channels
             log.debug("Immediately connected to node {}", channel.id());
             immediatelyConnectedKeys.add(key);
+            //如果连接成功，取消注册的OP_CONNECT事件
             key.interestOps(0);
         }
     }
@@ -288,7 +289,7 @@ public class Selector implements Selectable {
     public void poll(long timeout) throws IOException {
         if (timeout < 0)
             throw new IllegalArgumentException("timeout should be >= 0");
-
+//上一次poll方法的结果全部清除掉
         clear();
 
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
@@ -296,6 +297,7 @@ public class Selector implements Selectable {
 
         /* check ready keys */
         long startSelect = time.nanoseconds();
+        //从selector上找到有多少个key注册了
         int readyKeys = select(timeout);
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
@@ -331,10 +333,13 @@ public class Selector implements Selectable {
                 idleExpiryManager.update(channel.id(), currentTimeNanos);
 
             try {
-
+//第一次进来走这里
                 /* complete any connections that have finished their handshake (either normally or immediately) */
                 if (isImmediatelyConnected || key.isConnectable()) {
+                    //TODO 核心代码 最后完成网络的连接
+                    //如果之前初始化的时候，没有完成网络连接的话，这里一定帮你完成连接
                     if (channel.finishConnect()) {
+                        //网络连接已经完成之后，就把这个channel缓存起来
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
                         SocketChannel socketChannel = (SocketChannel) key.channel();
