@@ -338,6 +338,7 @@ public class Selector implements Selectable {
                 if (isImmediatelyConnected || key.isConnectable()) {
                     //TODO 核心代码 最后完成网络的连接
                     //如果之前初始化的时候，没有完成网络连接的话，这里一定帮你完成连接
+                    //如果socketChannel建立完成的，会取消对OP_CONNECT的关注，开始关注OP_READ事件
                     if (channel.finishConnect()) {
                         //网络连接已经完成之后，就把这个channel缓存起来
                         this.connected.add(channel.id());
