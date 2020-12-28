@@ -49,7 +49,7 @@ public final class Metadata {
 
     public static final long TOPIC_EXPIRY_MS = 5 * 60 * 1000;
     private static final long TOPIC_EXPIRY_NEEDS_UPDATE = -1L;
-
+//两次更新元数据的请求的最小时间间隔，默认100ms。因为我们请求元数据的过程其实不是一定成功的，而请求不到元数据信息的话，那我们就找不到leader partition了
     private final long refreshBackoffMs;
     //每隔多久更新一次。默认五分钟
     private final long metadataExpireMs;
@@ -57,7 +57,7 @@ public final class Metadata {
     private int version;
     private long lastRefreshMs;
     private long lastSuccessfulRefreshMs;
-    //记录kafka集群的元数据
+    //记录kafka集群的元数据（最重要）
     private Cluster cluster;
     //标志是否强制更新，这是触发Sender线程更新元数据的条件之一
     private boolean needUpdate;
@@ -206,13 +206,15 @@ public final class Metadata {
      * is set for topics if required and expired topics are removed from the metadata.
      */
     public synchronized void update(Cluster cluster, long now) {
+        //第一次KafkaProducer初始化的时候进来
+        //第二次NetworkClient poll获取到元数据的响应处理的时候进来
         Objects.requireNonNull(cluster, "cluster should not be null");
 
         this.needUpdate = false;
         this.lastRefreshMs = now;
         this.lastSuccessfulRefreshMs = now;
         this.version += 1;
-
+//默认值true
         if (topicExpiryEnabled) {
             // Handle expiry of topics from the metadata refresh set.
             for (Iterator<Map.Entry<String, Long>> it = topics.entrySet().iterator(); it.hasNext(); ) {
@@ -231,7 +233,7 @@ public final class Metadata {
             listener.onMetadataUpdate(cluster);
 
         String previousClusterId = cluster.clusterResource().clusterId();
-
+//默认值false
         if (this.needMetadataForAllTopics) {
             // the listener may change the interested topics, which could cause another metadata refresh.
             // If we have already fetched all topics, however, another fetch should be unnecessary.

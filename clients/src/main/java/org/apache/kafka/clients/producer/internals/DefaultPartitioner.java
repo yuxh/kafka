@@ -52,12 +52,12 @@ public class DefaultPartitioner implements Partitioner {
     public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
         int numPartitions = partitions.size();
-        //如果发送消息的时候我们没有指定key(注：很多情况下我们没有指定key)
-        if (keyBytes == null) {
+
+        if (keyBytes == null) {  //如果发送消息的时候我们没有指定key(注：很多情况下我们没有指定key),就使用round-robin方式
             //不断递增，确保消息不发到同一个分区里
             int nextValue = counter.getAndIncrement();
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
-            if (availablePartitions.size() > 0) {
+            if (availablePartitions.size() > 0) {//服务器上有leader的分区中选
                 int part = Utils.toPositive(nextValue) % availablePartitions.size();
                 return availablePartitions.get(part).partition();
             } else {

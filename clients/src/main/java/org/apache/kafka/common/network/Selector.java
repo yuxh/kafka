@@ -253,6 +253,7 @@ public class Selector implements Selectable {
     public void send(Send send) {
         KafkaChannel channel = channelOrFail(send.destination());
         try {
+          //  向 KafkaChannel 注册一个 Write 事件
             channel.setSend(send);
         } catch (CancelledKeyException e) {
             this.failedSends.add(send.destination());
@@ -297,7 +298,15 @@ public class Selector implements Selectable {
 
         /* check ready keys */
         long startSelect = time.nanoseconds();
-        //从selector上找到有多少个key注册了
+        //等待IO事件发生，从selector上找到有多少个key注册了
+        /*
+        轮询注册在多路复用器上的 Channel，它会一直阻塞在这个方法上，除非满足下面条件中的一个：
+    at least one channel is selected;
+    this selector’s {@link #wakeup wakeup} method is invoked;
+    the current thread is interrupted;
+    the given timeout period expires.
+
+         */
         int readyKeys = select(timeout);
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
@@ -335,6 +344,7 @@ public class Selector implements Selectable {
             try {
 //第一次进来走这里
                 /* complete any connections that have finished their handshake (either normally or immediately) */
+               // connect事件：注册1次，成功之后，就取消了。有且仅有1次
                 if (isImmediatelyConnected || key.isConnectable()) {
                     //TODO 核心代码 最后完成网络的连接
                     //如果之前初始化的时候，没有完成网络连接的话，这里一定帮你完成连接
@@ -356,16 +366,18 @@ public class Selector implements Selectable {
                 /* if channel is not ready finish prepare */
                 if (channel.isConnected() && !channel.ready())
                     channel.prepare();
-
+                //read事件：注册之后不取消，一直监听
                 /* if channel is ready read from any connections that have readable data */
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
                     while ((networkReceive = channel.read()) != null)
                         addToStagedReceives(channel, networkReceive);
                 }
-
+//send中的setSend方法会注册write
+                //write事件： 每调用一次send，注册1次。send成功，取消注册
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
                 if (channel.ready() && key.isWritable()) {
+                    //发送完成后,就删除这个 WRITE 事件
                     Send send = channel.write();
                     if (send != null) {
                         this.completedSends.add(send);
@@ -585,6 +597,7 @@ public class Selector implements Selectable {
         deque.add(receive);
     }
 
+    //这个方法的目的是处理接收到的 Receive，由于 Selector 这个类在 Client 和 Server 端都会调用，这里分两种情况.只有配合 Server 端的调用才能看明白其作用，它统一 Client 和 Server 调用的 api，使得都可以使用 Selector 这个类
     /**
      * checks if there are any staged receives and adds to completedReceives
      */

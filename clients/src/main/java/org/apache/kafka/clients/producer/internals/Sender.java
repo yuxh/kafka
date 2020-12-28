@@ -128,7 +128,7 @@ public class Sender implements Runnable {
      */
     public void run() {
         log.debug("Starting Kafka producer I/O thread.");
-
+//死循环，sender线程启动以后一直在运行的
         // main loop, runs until close is called
         while (running) {
             try {
@@ -193,7 +193,7 @@ public class Sender implements Runnable {
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
-            if (!this.client.ready(node, now)) {
+            if (!this.client.ready(node, now)) { //note: 如果没有与node建立连接的 ,这里会与其建立连接
                 //移除result里面要发送消息的主机
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
@@ -214,13 +214,14 @@ public class Sender implements Runnable {
                     this.accumulator.mutePartition(batch.topicPartition);
             }
         }
-//6：处理RA中的超时信息
+//6：处理RA中的超时RecordBatch 信息（由于元数据不可用而导致发送超时）
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
+        //7： 创建发送消息的请求
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -235,11 +236,12 @@ public class Sender implements Runnable {
         for (ClientRequest request : requests)
             client.send(request, now);
 
-        //真正执行网络操作的都是这个；包括发送请求、接收响应
+        //8:真正执行网络操作的都是这个；包括发送请求、接收响应
         // if some partitions are already ready to be sent, the select time would be 0;
         // otherwise if some partition already has some data accumulated but not ready yet,
         // the select time will be the time difference between now and its linger expiry time;
         // otherwise the select time will be the time difference between now and the metadata expiry time;
+        //在第一次执行，没有元数据的情况下，这个方法执行的只有下面这一句
         this.client.poll(pollTimeout, now);
     }
 

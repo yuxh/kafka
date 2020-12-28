@@ -248,7 +248,9 @@ public class NetworkClient implements KafkaClient {
 
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
+        //存request请求，存储的是还没收到响应的请求。默认最多存5个。后面如果这些请求有了响应，也会从inFlightRequests中去除
         this.inFlightRequests.add(request);
+        // Send是一个接口，这里返回的是 NetworkSend，而 NetworkSend 继承 ByteBufferSend
         selector.send(request.request());
     }
 
@@ -274,6 +276,7 @@ public class NetworkClient implements KafkaClient {
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
         handleCompletedSends(responses, updatedNow);
+        //处理接收到的响应，响应里面有我们需要的元数据
         handleCompletedReceives(responses, updatedNow);
         handleDisconnections(responses, updatedNow);
         handleConnections();
@@ -452,9 +455,13 @@ public class NetworkClient implements KafkaClient {
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
         for (NetworkReceive receive : this.selector.completedReceives()) {
+            //获取 broker id
             String source = receive.source();
+            //如果收到了响应，那对应的就要把inFlightRequests里面的参数移除出去
             ClientRequest req = inFlightRequests.completeNext(source);
+            //解析服务器发送回来的请求
             Struct body = parseResponse(receive.payload(), req.request().header());
+            //如果是关于元数据的响应
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
                 responses.add(new ClientResponse(req, now, false, body));
         }
@@ -600,6 +607,7 @@ public class NetworkClient implements KafkaClient {
 
         private void handleResponse(RequestHeader header, Struct body, long now) {
             this.metadataFetchInProgress = false;
+            //服务端发送回来的也是二进制数据结构，所以解析并封装成MetadataResponse对象
             MetadataResponse response = new MetadataResponse(body);
             Cluster cluster = response.cluster();
             // check if any topics metadata failed to get updated
@@ -636,14 +644,17 @@ public class NetworkClient implements KafkaClient {
                 return;
             }
             String nodeConnectionId = node.idString();
-
+//判断网络连接是否建立好
             if (canSendRequest(nodeConnectionId)) {
                 this.metadataFetchInProgress = true;
                 MetadataRequest metadataRequest;
                 if (metadata.needMetadataForAllTopics())
+                    //封装所有topic元数据信息的请求。但一般获取元数据的时候，只获取自己要发送消息对应的topic元数据信息
                     metadataRequest = MetadataRequest.allTopics();
                 else
+                    //默认这里
                     metadataRequest = new MetadataRequest(new ArrayList<>(metadata.topics()));
+                //创建好一个拉取元数据的请求
                 ClientRequest clientRequest = request(now, nodeConnectionId, metadataRequest);
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node.id());
                 doSend(clientRequest, now);

@@ -148,6 +148,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private final Serializer<V> valueSerializer;
     private final ProducerConfig producerConfig;
     private final long maxBlockTimeMs;
+    //发送一个请求出去之后，他有一个超时的时间限制，默认是30秒，如果30秒都收不到响应（也就是上面的回调函数没有返回），那么就会认为异常，会抛出一个TimeoutException来让我们进行处理。如果公司网络不好，要适当调整此参数
     private final int requestTimeoutMs;
     private final ProducerInterceptors<K, V> interceptors;
 
@@ -214,7 +215,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             clientId = config.getString(ProducerConfig.CLIENT_ID_CONFIG);
             if (clientId.length() <= 0)
                 clientId = "producer-" + PRODUCER_CLIENT_ID_SEQUENCE.getAndIncrement();
-            Map<String, String> metricTags = new LinkedHashMap<String, String>();
+            Map<String, String> metricTags = new LinkedHashMap<>();
             metricTags.put("client-id", clientId);
             MetricConfig metricConfig = new MetricConfig().samples(config.getInt(ProducerConfig.METRICS_NUM_SAMPLES_CONFIG))
                     .timeWindow(config.getLong(ProducerConfig.METRICS_SAMPLE_WINDOW_MS_CONFIG), TimeUnit.MILLISECONDS)
@@ -252,14 +253,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.interceptors = interceptorList.isEmpty() ? null : new ProducerInterceptors<>(interceptorList);
 
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer, valueSerializer, interceptorList, reporters);
-            //创建并更新集群元数据；重要参数metadata.max.age.ms，是Producer多久去更新一次Kafka的元数据
-            //默认是5分钟
+            //创建并更新集群元数据；用来存放从集群中获取到的元数据信息
+            //重要参数metadata.max.age.ms，是Producer多久去更新一次Kafka的元数据，默认是5分钟
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG), true, clusterResourceListeners);
-            //重要参数，这个参数开发的时候一般我们要进行设置，它指的是一个请求最大多大
+            //重要参数max.request.size，这个参数开发的时候一般我们要进行设置，它指的是一个请求最大多大(包含消息头、序列化之后的 key 和 value)
             //我们也可以理解为代表的意思是一条消息最大允许多大，这个的默认值是1M
             //1M这个值有些偏小。可以根据大家的公司的情况来，笔者在的公司设置为10M
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
-            //重要参数
+            //重要参数buffer.memory
             //消息在发送在之前都需要缓存起来，这地方指的就是缓存的内存大小
             //默认是32M，一般情况32M可以满足需求，但是也可以根据公司的情况进行调优
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
@@ -301,6 +302,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             }
 //对象里面传进去了我们刚刚分析的重要的参数；batch.size指定每个RecordBatch的大小，单位是字节
+            //linger.ms设置了固定多长时间，就算没塞满Batch，也会发送
             this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.totalMemorySize,
                     this.compressionType,
@@ -308,17 +310,18 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     retryBackoffMs,
                     metrics,
                     time);
-
+//之前通过类似 props.put("bootstrap.servers", "hadoop1:9092,hadoop2:9092,hadoop3:9092") 放入
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
             //这段代码看起来想是去获取集群的数据，但是其实代码里没有去获取到元数据
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
+            //默认security.protocol 是PLAINTEXT，最后得到的是PlaintextChannelBuilder
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
             //producer 网络IO的核心，里面传了很多重要的参数
             //MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION  每个连接允许最多有多个请求没收到响应，默认是5个。
             //如下的几个参数是跟网络相关的参数，大家可以积累，以后在自己的项目中也可以这么设置
-            //CONNECTIONS_MAX_IDLE_MS_CONFIG 一个网络连接，最多空闲多久，就要把回收掉 默认是9分钟。这个也可以根据情况去设置
+            //CONNECTIONS_MAX_IDLE_MS_CONFIG 一个网络连接，最多空闲多久，就要把回收掉 默认是9分钟。这个也可以根据情况去设置，一般情况下我们会设置成-1，-1时是什么情况下都不回收
             //RECONNECT_BACKOFF_MS_CONFIG 重试建立连接的时间间隔
-            //SEND_BUFFER_CONFIG soket发送缓冲区的大小，默认是128K
+            //SEND_BUFFER_CONFIG socket发送缓冲区的大小，默认是128K
             // RECEIVE_BUFFER_CONFIG  socket接收缓冲区的大小，默认是32K
             //上面的有个参数需要引起大家的注意：
             //MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION 对应的配置参数是max.in.flight.requests.per.connection
@@ -485,7 +488,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         try {
             //TODO 第一步：阻塞等待获取集群元数据，底层唤醒Sender线程更新Metadata中保存的Kafka集群元数据;负责触发Kafka集群元数据的更新，并阻塞主线程等待更新完毕
             // first make sure the metadata for the topic is available
-            // maxBlockTimeMs 获取元数据最多等待的时间
+            // maxBlockTimeMs 获取元数据最多等待的时间，因为这个拉取过程进行时代码是阻塞在这里的，所以我们必须设置一个时间限制来放行。
             ClusterAndWaitTime clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), maxBlockTimeMs);
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
@@ -572,6 +575,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * @return The cluster containing topic metadata and the amount of time we waited in ms
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long maxWaitMs) throws InterruptedException {
+        //因为客户端对于 topic 会有一个过期机制，对于长时间未使用的 topic 会从本地缓存中移除
         // add topic to metadata topic list if it is not there already and reset expiry
         metadata.add(topic);
         //找看有没有元数据的缓存，也就是是否曾经拉取过了，但是我们假设现在我们是第一次启动，所以明显是没有的
@@ -605,7 +609,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //去向服务端获取元数据
             sender.wakeup();
             try {
-                //主线程等待Sender线程完成更新。
+                //同步的等待：主线程等待Sender线程完成更新。
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
