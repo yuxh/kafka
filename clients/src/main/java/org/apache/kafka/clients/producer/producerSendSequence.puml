@@ -1,0 +1,11 @@
+@startuml
+KafkaProducer -> KafkaProducer: 1:send()
+KafkaProducer -> ProducerInterceptor: 2:onSend()
+KafkaProducer -> KafkaProducer: 3:doSend()
+KafkaProducer -> KafkaProducer: 4:waitOnMetadata()
+KafkaProducer -> Serializer: 5:serialize()
+KafkaProducer -> KafkaProducer: 6:partition()
+KafkaProducer -> KafkaProducer: 7:ensureValidRecordSize()
+KafkaProducer -> RecordAccumulator: 8:append()
+KafkaProducer -> Sender: 9:wakeup()
+@enduml

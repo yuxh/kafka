@@ -121,7 +121,7 @@ public class KafkaChannel {
             return socket.getLocalAddress().toString();
         return socket.getInetAddress().toString();
     }
-
+//配合下面的配合 write()
     public void setSend(Send send) {
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress.");
@@ -144,7 +144,7 @@ public class KafkaChannel {
         }
         return result;
     }
-
+//Selector.poll()中调用
     public Send write() throws IOException {
         Send result = null;
         if (send != null && send(send)) {

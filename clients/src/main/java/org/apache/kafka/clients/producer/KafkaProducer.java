@@ -622,6 +622,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             if (cluster.unauthorizedTopics().contains(topic))
                 throw new TopicAuthorizationException(topic);
             remainingWaitMs = maxWaitMs - elapsed;
+            //不为null，说明获取元数据成功
             partitionsCount = cluster.partitionCountForTopic(topic);
         } while (partitionsCount == null);
 

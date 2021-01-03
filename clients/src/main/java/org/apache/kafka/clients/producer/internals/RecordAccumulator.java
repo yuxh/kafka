@@ -220,7 +220,7 @@ public final class RecordAccumulator {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
                 //TODO 步骤五 尝试往内存里面添加消息 double_check
-                //第一次执行到这儿仍然失败，虽然已经分配了内存，但还没创建批次
+                //两次获取dq锁的过程中可能有其它线程创建了可用的batch，如果tryAppend成功则直接返回
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...

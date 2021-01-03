@@ -438,10 +438,13 @@ public class NetworkClient implements KafkaClient {
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // if no response is expected then when the send is completed, return it
+        // 遍历所有的发送完成的send对象
         for (Send send : this.selector.completedSends()) {
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
+            //对于发送成功，但是不期望服务端响应的请求，创建本地响应队列并将其添加进去
             if (!request.expectResponse()) {
                 this.inFlightRequests.completeLastSent(send.destination());
+                // 添加到本地响应队列中
                 responses.add(new ClientResponse(request, now, false, null));
             }
         }
@@ -454,6 +457,7 @@ public class NetworkClient implements KafkaClient {
      * @param now The current time
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
+        //从completedReceives中遍历所有的接收信息，completedReceives中的信息是在上一层的selector.poll中添加进去的
         for (NetworkReceive receive : this.selector.completedReceives()) {
             //获取 broker id
             String source = receive.source();
