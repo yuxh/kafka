@@ -312,7 +312,9 @@ public class Selector implements Selectable {
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
 
         if (readyKeys > 0 || !immediatelyConnectedKeys.isEmpty()) {
+            //处理已经ready的事件，进行相应的 IO 操作
             pollSelectionKeys(this.nioSelector.selectedKeys(), false, endSelect);
+            //处理新建立的那些连接，添加缓存及传输层
             pollSelectionKeys(immediatelyConnectedKeys, true, endSelect);
         }
 
@@ -344,7 +346,7 @@ public class Selector implements Selectable {
             try {
 //第一次进来走这里
                 /* complete any connections that have finished their handshake (either normally or immediately) */
-               // connect事件：注册1次，成功之后，就取消了。有且仅有1次
+               // connect事件：注册1次，成功之后，就取消了。有且仅有1次 ；处理一些刚建立 tcp 连接的 channel
                 if (isImmediatelyConnected || key.isConnectable()) {
                     //TODO 核心代码 最后完成网络的连接
                     //如果之前初始化的时候，没有完成网络连接的话，这里一定帮你完成连接
@@ -362,7 +364,7 @@ public class Selector implements Selectable {
                     } else
                         continue;
                 }
-
+//处理 tcp 连接还未完成的连接,进行传输层的握手及认证
                 /* if channel is not ready finish prepare */
                 if (channel.isConnected() && !channel.ready())
                     channel.prepare();
@@ -370,7 +372,7 @@ public class Selector implements Selectable {
                 /* if channel is ready read from any connections that have readable data */
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
-                    while ((networkReceive = channel.read()) != null)
+                    while ((networkReceive = channel.read()) != null)// 直到读取一个完整的 Receive,才添加到集合中
                         addToStagedReceives(channel, networkReceive);
                 }
 //send中的setSend方法会注册write
@@ -380,12 +382,13 @@ public class Selector implements Selectable {
                     //发送完成后,就删除这个 WRITE 事件
                     Send send = channel.write();
                     if (send != null) {
-                        this.completedSends.add(send);
+                        this.completedSends.add(send);//将完成的 send 添加到 list 中
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }
                 }
 
                 /* cancel any defunct sockets */
+                //关闭断开的连接
                 if (!key.isValid()) {
                     close(channel);
                     this.disconnected.add(channel.id());
