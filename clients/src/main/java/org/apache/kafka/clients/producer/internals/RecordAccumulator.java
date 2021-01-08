@@ -490,6 +490,7 @@ public final class RecordAccumulator {
         if (d != null)
             return d;
         d = new ArrayDeque<>();
+        //FIXME putIfAbsent有无必要？如果之前不存在 tp->null 这种键值对，put就行；如果存在，这个方法也不会把d放入进去
         Deque<RecordBatch> previous = this.batches.putIfAbsent(tp, d);
         if (previous == null)
             return d;

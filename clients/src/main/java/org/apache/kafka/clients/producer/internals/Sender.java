@@ -366,6 +366,8 @@ public class Sender implements Runnable {
      * Create a produce request from the given record batches
      */
     private ClientRequest produceRequest(long now, int destination, short acks, int timeout, List<RecordBatch> batches) {
+        //把数据结构 nodeId-> RecordBatch集合 整理
+        //一个消息体的结构如下：1个nodeid+ m个topic数据；每个topic数据包含1个topic名称+n个数据；每个数据包含1个分区号+有效负载
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());
         final Map<TopicPartition, RecordBatch> recordsByPartition = new HashMap<TopicPartition, RecordBatch>(batches.size());
         for (RecordBatch batch : batches) {
