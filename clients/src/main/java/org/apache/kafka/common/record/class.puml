@@ -1,0 +1,24 @@
+@startuml
+
+class MemoryRecords
+class RecordBatch
+abstract class AbstractList
+abstract AbstractCollection
+interface List
+interface Collection
+
+MemoryRecords <|- RecordBatch:1:1
+List <|-- AbstractList
+Collection <|-- AbstractCollection
+
+Collection <|- List
+AbstractCollection <|- AbstractList
+AbstractList <|-- ArrayList
+
+class ArrayList {
+Object[] elementData
+size()
+}
+
+
+@enduml
