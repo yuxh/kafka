@@ -174,7 +174,7 @@ public class Sender implements Runnable {
         //1:获取元数据；第一次进来时，还没有获取到元数据
         Cluster cluster = metadata.fetch();
         //2:判断那些分区有数据可以发送，获取到这个分区的leader 分区对应的broker
-        //哪些broker上面需要我们去发送消息？
+        //哪些broker上面需要我们去发送消息？这个ready是通过batches的数据来筛选的，并没有和网络打交道
         // get the list of partitions with data ready to send
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
         //3:还没有拉取到元数据的topic,如果上面的ReadyCheckResult标志有，就调用requestUpdate标记需要更新Kafka的集群信息
@@ -370,6 +370,7 @@ public class Sender implements Runnable {
         //一个消息体的结构如下：1个nodeid+ m个topic数据；每个topic数据包含1个topic名称+n个数据；每个数据包含1个分区号+有效负载
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());
         final Map<TopicPartition, RecordBatch> recordsByPartition = new HashMap<TopicPartition, RecordBatch>(batches.size());
+        //从drain方法可知，batches中每个批次对应的tp是唯一的
         for (RecordBatch batch : batches) {
             TopicPartition tp = batch.topicPartition;
             produceRecordsByPartition.put(tp, batch.records.buffer());
