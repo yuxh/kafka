@@ -122,6 +122,7 @@ public final class RecordBatch {
                                                                  thunk.future.checksum(),
                                                                  thunk.future.serializedKeySize(),
                                                                  thunk.future.serializedValueSize());
+                    //调用消息自定义的callback：注意这里第二个参数表示异常。如果为null，则表示请求成功
                     thunk.callback.onCompletion(metadata, null);
                     //处理过程出现异常，第一个参数为null
                 } else {

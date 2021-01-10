@@ -26,7 +26,7 @@ public class NetworkSend extends ByteBufferSend {
     public NetworkSend(String destination, ByteBuffer... buffers) {
         super(destination, sizeDelimit(buffers));
     }
-
+//增加了4字节表示内容大小(不包含这4byte)，这种写法可读性不高，可参考0.10.2的修改
     private static ByteBuffer[] sizeDelimit(ByteBuffer[] buffers) {
         int size = 0;
         for (int i = 0; i < buffers.length; i++)

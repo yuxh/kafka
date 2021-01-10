@@ -283,6 +283,7 @@ public class NetworkClient implements KafkaClient {
         handleTimedOutRequests(responses, updatedNow);
 
         // invoke callbacks
+        //这些回调Sender.handleProduceResponse， 是在Sender.createProduceRequests->produceRequest时把callback设置到ClientRequest中，
         for (ClientResponse response : responses) {
             if (response.request().hasCallback()) {
                 try {

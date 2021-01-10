@@ -24,6 +24,7 @@ public class ByteBufferSend implements Send {
 
     private final String destination;
     private final int size;
+    //要发送的内容(说明kafka一次最大传输字节是有限定的)
     protected final ByteBuffer[] buffers;
     private int remaining;
     private boolean pending = false;
@@ -34,6 +35,7 @@ public class ByteBufferSend implements Send {
         this.buffers = buffers;
         for (int i = 0; i < buffers.length; i++)
             remaining += buffers[i].remaining();
+        //size是bytebuffer的大小
         this.size = remaining;
     }
 
@@ -41,7 +43,7 @@ public class ByteBufferSend implements Send {
     public String destination() {
         return destination;
     }
-
+    //没有要发送的数据了
     @Override
     public boolean completed() {
         return remaining <= 0 && !pending;

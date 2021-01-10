@@ -174,7 +174,7 @@ public class Sender implements Runnable {
         //1:获取元数据；第一次进来时，还没有获取到元数据
         Cluster cluster = metadata.fetch();
         //2:判断那些分区有数据可以发送，获取到这个分区的leader 分区对应的broker
-        //哪些broker上面需要我们去发送消息？
+        //哪些broker上面需要我们去发送消息？这个ready是通过batches的数据来筛选的，并没有和网络打交道
         // get the list of partitions with data ready to send
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
         //3:还没有拉取到元数据的topic,如果上面的ReadyCheckResult标志有，就调用requestUpdate标记需要更新Kafka的集群信息
