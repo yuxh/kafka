@@ -185,7 +185,8 @@ public class Selector implements Selectable {
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
-            //因为是非阻塞模式，所以socketChannel.connect 发起一个连接，在连接正式建立以前就可能返回，后面通过finishConnect确认是否真正建立
+            //因为是非阻塞模式，所以该方法返回时，连接不一定已经建立好（即完成3次握手）
+            //一般来说server和client在一台机器上，该方法可能返回true。在后面会通过KSelector.finishConnect() 方法确认连接是否真正建立了。
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -250,10 +251,12 @@ public class Selector implements Selectable {
      * Queue the given request for sending in the subsequent {@link #poll(long)} calls
      * @param send The request to send
      */
+    //将之前创建的NetworkSend对象缓存到KafkaChannel的send字段中，并开始关注此连接的OP_WRITE事件，并没有发生网络I/O
     public void send(Send send) {
         KafkaChannel channel = channelOrFail(send.destination());
         try {
           //  向 KafkaChannel 注册一个 Write 事件
+            //暂存在这个channel里面，没有真正的发送,一次poll过程只能发送一个
             channel.setSend(send);
         } catch (CancelledKeyException e) {
             this.failedSends.add(send.destination());
@@ -362,7 +365,7 @@ public class Selector implements Selectable {
                                 socketChannel.socket().getSoTimeout(),
                                 channel.id());
                     } else
-                        continue;
+                        continue;//连接未完成，则跳过对此channel的后续处理:也就是理解为建立连接是前提。
                 }
 //处理 tcp 连接还未完成的连接,进行传输层的握手及认证
                 /* if channel is not ready finish prepare */
@@ -372,21 +375,32 @@ public class Selector implements Selectable {
                 /* if channel is ready read from any connections that have readable data */
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
+              /*
+        	若读取不到一个完整的NetworkReceive，则返回null,下次处理 OP_READ事件时，继续读取，直到读到一个完整的NetworkReceive。
+           */
+                    //读取一个完整的NetworkReceive后，会将其缓存存到stagedReceives中，当一次pollSelectionKeys()完成后会将stagedReceives中的数据转移到completedReceives。
                     while ((networkReceive = channel.read()) != null)// 直到读取一个完整的 Receive,才添加到集合中
                         addToStagedReceives(channel, networkReceive);
                 }
 //send中的setSend方法会注册write
                 //write事件： 每调用一次send，注册1次。send成功，取消注册
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
+                // 写操作的事件没有使用while循环来控制，而是在完成发送时取消掉Write事件。如果Send在一次write调用时没有写完，SelectionKey的OP_WRITE事件没有取消，
+                // 下次isWritable事件会继续触发，直到整个Send请求发送完毕才取消。所以发送一个完整的Send请求是通过最外层的while(iter.hasNext)，即SelectionKey控制的。
                 if (channel.ready() && key.isWritable()) {
                     //发送完成后,就删除这个 WRITE 事件
                     Send send = channel.write();
+                    // 一个Send对象可能会被拆成几次发送，write非空代表一个send发送完成
                     if (send != null) {
                         this.completedSends.add(send);//将完成的 send 添加到 list 中
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }
                 }
-
+/*
+比较读和写在poll中的处理方式。一旦有读操作，就要读取一个完整的NetworkReceive。如果是写，可以分多次写。
+即读操作会在一次SelectionKey循环读取一个完整的接收动作，而写操作会在多次SelectionKey中完成一个完整的发送动作。
+写完后（成功地发送了Send请求），会取消掉WRITE事件（本次写已完成）。而读完并没有取消掉READ事件（可能还要读新的数据）。这所谓的消息的分包。
+ */
                 /* cancel any defunct sockets */
                 //关闭断开的连接
                 if (!key.isValid()) {
@@ -591,6 +605,7 @@ public class Selector implements Selectable {
 
     /**
      * adds a receive to staged receives
+     * 一次读操作就会有一个NetworkReceive生成,并加入到channel对应的队列中
      */
     private void addToStagedReceives(KafkaChannel channel, NetworkReceive receive) {
         if (!stagedReceives.containsKey(channel))

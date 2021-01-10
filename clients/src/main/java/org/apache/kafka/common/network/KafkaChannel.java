@@ -123,6 +123,7 @@ public class KafkaChannel {
     }
 //配合下面的 write()
     public void setSend(Send send) {
+        //send字段上还保存着一个未完全发送成功的RequestSend请求，为了防止覆盖，会抛出异常
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress.");
         this.send = send;
