@@ -441,11 +441,13 @@ public final class RecordAccumulator {
             int start = drainIndex = drainIndex % parts.size();
             do {
                 PartitionInfo part = parts.get(drainIndex);
+                //例如：第一次循环hello1,第二次world2，第三次hello2。。。
                 TopicPartition tp = new TopicPartition(part.topic(), part.partition());
                 // Only proceed if the partition has no in-flight batches.
                 if (!muted.contains(tp)) {
                     Deque<RecordBatch> deque = getDeque(new TopicPartition(part.topic(), part.partition()));
                     if (deque != null) {
+                        //每次只取某个tp对应队列的头个批次，因此返回的ready批次集合是该节点上每个分区队列取出一个批次
                         synchronized (deque) {
                             RecordBatch first = deque.peekFirst();
                             if (first != null) {

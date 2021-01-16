@@ -370,6 +370,7 @@ public class Sender implements Runnable {
         //一个消息体的结构如下：1个nodeid+ m个topic数据；每个topic数据包含1个topic名称+n个数据；每个数据包含1个分区号+有效负载
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());
         final Map<TopicPartition, RecordBatch> recordsByPartition = new HashMap<TopicPartition, RecordBatch>(batches.size());
+        //从drain方法可知，batches中每个批次对应的tp是唯一的
         for (RecordBatch batch : batches) {
             TopicPartition tp = batch.topicPartition;
             produceRecordsByPartition.put(tp, batch.records.buffer());
