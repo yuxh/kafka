@@ -34,6 +34,8 @@ final class InFlightRequests {
 
     /**
      * Add the given request to the queue for the connection it was directed to
+     * 表示已经发送，或正在发送。并且还没有收到响应的（客户端）请求。请求首先加入到（目标节点对应的）队列头部
+     * 注意：由于这个方法调用之前会先使用canSendRequest()，因此新的请求能加进来的条件是上一个请求必须已经发送成功！（这就避免了因为网络阻塞，请求一直堆积在某个节点上。）
      */
     public void add(ClientRequest request) {
         Deque<ClientRequest> reqs = this.requests.get(request.request().destination());
@@ -41,6 +43,7 @@ final class InFlightRequests {
             reqs = new ArrayDeque<>();
             this.requests.put(request.request().destination(), reqs);
         }
+        // reqs队列首部添加
         reqs.addFirst(request);
     }
 
@@ -58,6 +61,7 @@ final class InFlightRequests {
      * Get the oldest request (the one that that will be completed next) for the given node
      */
     public ClientRequest completeNext(String node) {
+        //取出队尾元素（队尾的元素是时间最久的，也是应该先处理的）
         return requestQueue(node).pollLast();
     }
 
@@ -71,6 +75,7 @@ final class InFlightRequests {
 
     /**
      * Complete the last request that was sent to a particular node.
+     * 取出该连接，最新的请求
      * @param node The node the request was sent to
      * @return The request
      */
@@ -80,13 +85,16 @@ final class InFlightRequests {
 
     /**
      * Can we send more requests to this node?
-     * 
+     * 使用队列虽然可以存储多个请求，但是新的请求能加进来的条件是上一个请求必须已经发送成功。
      * @param node Node in question
      * @return true iff we have no requests still being sent to the given node
      */
     public boolean canSendMore(String node) {
         Deque<ClientRequest> queue = requests.get(node);
+        //判断条件：队列为空
         return queue == null || queue.isEmpty() ||
+                //或者队列头请求已经发送完成且队列中没有堆积过多请求
+                //如果队头的请求迟迟发送不出去，可能是网络的原因，则不能继续向此Node发送请求;如果Node已经堆积了很多未响应的请求，说明这个节点的负载或网络连接有问题，继续发送请求，则可能会超时
                (queue.peekFirst().request().completed() && queue.size() < this.maxInFlightRequestsPerConnection);
     }
 

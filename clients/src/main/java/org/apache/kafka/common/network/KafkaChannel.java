@@ -150,9 +150,11 @@ public class KafkaChannel {
     public Send write() throws IOException {
         Send result = null;
         if (send != null && send(send)) {
+            //全部发送完成
             result = send;
             send = null;
         }
+        //没完成就返回null
         return result;
     }
 

@@ -371,7 +371,7 @@ public class Selector implements Selectable {
                 /* if channel is not ready finish prepare */
                 if (channel.isConnected() && !channel.ready())
                     channel.prepare();
-                //read事件：注册之后不取消，一直监听
+                //read事件：注册之后不取消，一直监听;因为是LT模式，只要“读缓冲区”有数据，就会一直触发。
                 /* if channel is ready read from any connections that have readable data */
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
@@ -388,6 +388,7 @@ public class Selector implements Selectable {
                 // 写操作的事件没有使用while循环来控制，而是在完成发送时取消掉Write事件。如果Send在一次write调用时没有写完，SelectionKey的OP_WRITE事件没有取消，
                 // 下次isWritable事件会继续触发，直到整个Send请求发送完毕才取消。所以发送一个完整的Send请求是通过最外层的while(iter.hasNext)，即SelectionKey控制的。
                 if (channel.ready() && key.isWritable()) {
+//                    write事件就绪：这个指什么呢？ 其实指本地的socket缓冲区有没有满。没有满的话，就会一直触发写事件。所以要避免”写的死循环“问题，写完，要取消写事件。
                     //发送完成后,就删除这个 WRITE 事件
                     Send send = channel.write();
                     // 一个Send对象可能会被拆成几次发送，write非空代表一个send发送完成
