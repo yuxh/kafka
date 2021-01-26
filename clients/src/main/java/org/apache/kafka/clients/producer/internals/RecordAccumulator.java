@@ -248,7 +248,7 @@ public final class RecordAccumulator {
      * resources (like compression streams buffers).
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
-        //首先获取队列里的一个批次
+        //首先获取队列里的一个批次(队尾)
         RecordBatch last = deque.peekLast();
         //第一次进来是没有批次的
         if (last != null) {

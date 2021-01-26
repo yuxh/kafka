@@ -379,7 +379,7 @@ public class Selector implements Selectable {
         	若读取不到一个完整的NetworkReceive，则返回null,下次处理 OP_READ事件时，继续读取，直到读到一个完整的NetworkReceive。
            */
                     //读取一个完整的NetworkReceive后，会将其缓存存到stagedReceives中，当一次pollSelectionKeys()完成后会将stagedReceives中的数据转移到completedReceives。
-                    while ((networkReceive = channel.read()) != null)// 直到读取一个完整的 Receive,才添加到集合中
+                    while ((networkReceive = channel.read()) != null)// 直到读取一个完整的 Receive(不完整返回的是null),才添加到集合中
                         addToStagedReceives(channel, networkReceive);
                 }
 //send中的setSend方法会注册write

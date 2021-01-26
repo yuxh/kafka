@@ -19,6 +19,7 @@ import org.apache.kafka.common.protocol.types.Struct;
 
 /**
  * A send object for a kafka request
+ * 真正通过网络IO发送的对象，格式符合请求协议，有效负载就是produceRecordsByPartition中的数据
  */
 public class RequestSend extends NetworkSend {
 

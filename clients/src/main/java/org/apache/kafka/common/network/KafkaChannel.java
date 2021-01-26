@@ -136,7 +136,8 @@ public class KafkaChannel {
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id);
         }
-
+//从transportLayer中读取数据到NetworkReceive对象中。假设没有读完一个完整的NetworkReceive对象，则下次触发OP_READ事件时继续填充此NetworkReceive对象；
+        //如果读取完整，则把receive置空，下次触发操作时，创建新NetworkReceive对象
         receive(receive);
         if (receive.complete()) {
             receive.payload().rewind();
@@ -161,6 +162,7 @@ public class KafkaChannel {
 //发送完成后,就删除这个 WRITE 事件
     private boolean send(Send send) throws IOException {
         send.writeTo(transportLayer);
+        //通过ByteBuffer中是否还有剩余字节来判断是否发送完成
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
 
