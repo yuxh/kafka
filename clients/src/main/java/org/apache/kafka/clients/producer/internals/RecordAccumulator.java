@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>
  * The accumulator uses a bounded amount of memory and append calls will block when that memory is exhausted, unless
  * this behavior is explicitly disabled.
+ * 至少有一个业务线程（如KafkaProducer）和一个Sender线程并发操作，所以必须线程安全
  */
 public final class RecordAccumulator {
 
@@ -213,7 +214,7 @@ public final class RecordAccumulator {
             //把Kafka的批次的大小也调大
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
-            //TODO 步骤四 分配内存
+            //TODO 步骤四 分配内存,这里如果申请的空间较大会发生阻塞，影响其他申请空间小的线程，因此没放在一个同步块中，减少锁的持有时间
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
@@ -474,6 +475,7 @@ public final class RecordAccumulator {
                     }
                 }
                 this.drainIndex = (this.drainIndex + 1) % parts.size();
+                //FIXME 如果drainIndex从0开始，parts是5个，正常5个遍历完之后跳出while。如果3的时候跳出了，下个节点从3开始？
             } while (start != drainIndex);
             batches.put(node.id(), ready);
         }
