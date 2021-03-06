@@ -203,13 +203,13 @@ public class Sender implements Runnable {
         //可能要发送的分区有多个，很有可能一些分区的leader分区是在同一台服务器上面。
         //就把同一个broker的分区放在一组，如 broker0 ->分区1、2
         // create produce requests
-        Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
+        Map<Integer, List<RecordBatch>> batchesByNode = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,
                                                                          now);
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
-            for (List<RecordBatch> batchList : batches.values()) {
+            for (List<RecordBatch> batchList : batchesByNode.values()) {
                 for (RecordBatch batch : batchList)
                     this.accumulator.mutePartition(batch.topicPartition);
             }
@@ -220,9 +220,9 @@ public class Sender implements Runnable {
         for (RecordBatch expiredBatch : expiredBatches)
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
-        sensors.updateProduceRequestMetrics(batches);
+        sensors.updateProduceRequestMetrics(batchesByNode);
         //7： 创建发送消息的请求
-        List<ClientRequest> requests = createProduceRequests(batches, now);
+        List<ClientRequest> requests = createProduceRequests(batchesByNode, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
         // that isn't yet sendable (e.g. lingering, backing off). Note that this specifically does not include nodes
