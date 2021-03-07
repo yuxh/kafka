@@ -345,7 +345,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //ACKS_CONFIG acks,这个的值由 0 1 all(-1) 三个数
             //0 代表 生成者把消息发送给Broker以后，就立马返回。至于有没有写成功也不关心
             //1 代表 生成者把消息发送给Broker以后，需要等leader partition写入成功以后 返回响应。
-            //1- 代表需要所有的partition都写入成功以后才返回响应。
+            //-1 代表需要所有的partition都写入成功以后才返回响应。
             //注：0 1 两个都会有可能造成数据丢失。0 的结果很好想，我只是发送到服务端，然后立马返回
             //服务端那儿有可能就会写失败。写失败了数据就丢了。1 发送到服务端以后还要等leader partition写入
             //成功以后才会返回响应，但是大家想如果这个时候leader partition在的broker要是宕机了
@@ -529,6 +529,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //那么唤醒sender线程，让sender线程开始干活
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
+                //Sender -> NetworkClient -> Selector(Kafka 封装的) -> Selector(Java NIO)
                 this.sender.wakeup();
             }
             return result.future;
@@ -609,7 +610,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //去向服务端获取元数据
             sender.wakeup();
             try {
-                //同步的等待：主线程等待Sender线程完成更新。
+                //同步的等待：主线程等待Sender线程完成更新。线程会阻塞在 while 循环中，直到 metadata 更新成功或者 timeout。
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
@@ -819,6 +820,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * computes partition for given record.
      * if the record has partition returns the value otherwise
      * calls configured partitioner class to compute the partition.
+     * 关于 partition 值的计算，分为三种情况：
+     *
+     * 1、 指明 partition 的情况下，直接将指明的值直接作为 partiton 值；
+     * 2、 没有指明 partition 值但有 key 的情况下，将 key 的 hash 值与 topic 的 partition 数进行取余得到 partition 值；
+     * 3、 既没有 partition 值又没有 key 值的情况下，第一次调用时随机生成一个整数（后面每次调用在这个整数上自增），将这个值与 topic 可用的 partition 总数取余得到 partition 值，也就是常说的 round-robin 算法。
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey, byte[] serializedValue, Cluster cluster) {
         //如果当前消息已经分配了分区号，那么就直接用这个分区号就行
