@@ -559,8 +559,10 @@ public class NetworkClient implements KafkaClient {
         @Override
         public long maybeUpdate(long now) {
             // should we update our metadata?
+            // 获取下次更新集群信息的时间戳
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
             long timeToNextReconnectAttempt = Math.max(this.lastNoNodeAvailableMs + metadata.refreshBackoff() - now, 0);
+            // 检查是否已经发送了 MetadataRequest 请求
             long waitForMetadataFetch = this.metadataFetchInProgress ? Integer.MAX_VALUE : 0;
             // if there is no node available to connect, back off refreshing metadata
             long metadataTimeout = Math.max(Math.max(timeToNextMetadataUpdate, timeToNextReconnectAttempt),
@@ -651,7 +653,8 @@ public class NetworkClient implements KafkaClient {
             }
             String nodeConnectionId = node.idString();
 //判断网络连接是否建立好
-            if (canSendRequest(nodeConnectionId)) {
+            if (canSendRequest(nodeConnectionId)) {    // 如果允许向该节点发送请求
+                // 标识正在请求更新集群元数据信息
                 this.metadataFetchInProgress = true;
                 MetadataRequest metadataRequest;
                 if (metadata.needMetadataForAllTopics())
@@ -664,7 +667,7 @@ public class NetworkClient implements KafkaClient {
                 ClientRequest clientRequest = request(now, nodeConnectionId, metadataRequest);
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node.id());
                 doSend(clientRequest, now);
-            } else if (connectionStates.canConnect(nodeConnectionId, now)) {
+            } else if (connectionStates.canConnect(nodeConnectionId, now)) {     // 如果允许创建到目标节点的连接，则初始化连接
                 // we don't have a connection to this node right now, make one
                 log.debug("Initialize connection to node {} for sending metadata request", node.id());
                 initiateConnect(node, now);
