@@ -348,6 +348,7 @@ public final class RecordAccumulator {
         Set<String> unknownLeaderTopics = new HashSet<>();
 //条件3：是否有线程在阻塞等待BufferPool 释放空间（即BufferPool的空间耗尽了）
         boolean exhausted = this.free.queued() > 0;
+        System.out.println("RecordAccumulator.ready ,topic count="+batches.size());
         //遍历所有分区
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();

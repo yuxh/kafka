@@ -208,6 +208,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private KafkaProducer(ProducerConfig config, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
         try {
             log.trace("Starting the Kafka producer");
+            System.out.println("KafkaProducer constructor...");
             Map<String, Object> userProvidedConfigs = config.originals();
             this.producerConfig = config;
             this.time = new SystemTime();
@@ -366,6 +367,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             String ioThreadName = "kafka-producer-network-thread" + (clientId.length() > 0 ? " | " + clientId : "");
             //启动Sender对应的线程
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
+            System.out.println("start Sender thread!");
             this.ioThread.start();
 
             this.errors = this.metrics.sensor("errors");
@@ -484,6 +486,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * Implementation of asynchronously send a record to a topic.
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
+        System.out.println("producer.doSend begin");
         TopicPartition tp = null;
         try {
             //TODO 第一步：阻塞等待获取集群元数据，底层唤醒Sender线程更新Metadata中保存的Kafka集群元数据;负责触发Kafka集群元数据的更新，并阻塞主线程等待更新完毕
@@ -492,6 +495,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             ClusterAndWaitTime clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), maxBlockTimeMs);
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
+            System.out.println("producer.waitOnMetadata over,remainingWaitMs="+remainingWaitMs+",cluster="+cluster);
             //第二步：对key和value进行序列化
             byte[] serializedKey;
             try {
@@ -528,10 +532,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //消息存入accumulator中，如果一个批次满了，或者是创建了一个新的批次
             //那么唤醒sender线程，让sender线程开始干活
             if (result.batchIsFull || result.newBatchCreated) {
+                System.out.println("批次满足某些条件，让sender干活!");
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 //Sender -> NetworkClient -> Selector(Kafka 封装的) -> Selector(Java NIO)
                 this.sender.wakeup();
             }
+            System.out.println("返回producer.doSend.........");
             return result.future;
             // handling exceptions and record the errors;
             // for API exceptions return them in the future,
@@ -576,6 +582,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * @return The cluster containing topic metadata and the amount of time we waited in ms
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long maxWaitMs) throws InterruptedException {
+        System.out.println("Producer.waitOnMetadata start.............maxWaitMs="+maxWaitMs);
         //因为客户端对于 topic 会有一个过期机制，对于长时间未使用的 topic 会从本地缓存中移除
         // add topic to metadata topic list if it is not there already and reset expiry
         metadata.add(topic);
@@ -608,6 +615,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //唤醒sender线程，由sender线程更新Metadata中保存的Kafka集群元数据
             //sender线程被初始化并且启动是在我们分析KafkaProducer的构造函数的时候。所以我们等一下回过头来就要去分析sender里面的代码。现在就默认这段代码会让sender线程
             //去向服务端获取元数据
+            System.out.println("Producer.waitOnMetadata wakeup sender.............");
             sender.wakeup();
             try {
                 //同步的等待：主线程等待Sender线程完成更新。线程会阻塞在 while 循环中，直到 metadata 更新成功或者 timeout。
@@ -618,6 +626,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             }
             cluster = metadata.fetch();
             elapsed = time.milliseconds() - begin;
+            System.out.println("metadata.awaitUpdate end ,elapsed="+elapsed+",remainingWaitMs="+remainingWaitMs);
             if (elapsed >= maxWaitMs)
                 throw new TimeoutException("Failed to update metadata after " + maxWaitMs + " ms.");
             if (cluster.unauthorizedTopics().contains(topic))

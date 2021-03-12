@@ -310,7 +310,10 @@ public class Selector implements Selectable {
     the given timeout period expires.
 
          */
+        System.out.println("nioselector timeout="+timeout);
         int readyKeys = select(timeout);
+        log.debug("nioselector awake to get readyKeys="+readyKeys);
+        System.out.println("nioselector awake to get readyKeys="+readyKeys);
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
 

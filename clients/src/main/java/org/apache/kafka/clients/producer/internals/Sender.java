@@ -171,6 +171,8 @@ public class Sender implements Runnable {
      *            The current POSIX time in milliseconds
      */
     void run(long now) {
+        log.debug(" Sender run now :"+now);
+        System.out.println(" Sender run now :"+now);
         //1:获取元数据；第一次进来时，还没有获取到元数据
         Cluster cluster = metadata.fetch();
         //2:判断那些分区有数据可以发送，获取到这个分区的leader 分区对应的broker
@@ -190,6 +192,7 @@ public class Sender implements Runnable {
 //4:根据readyNodes集合，循环调用NetworkClient.ready,目的是检查网络IO方面是否满足发送消息的条件，不符合条件的Node将会从readyNodes集合中删除。
         // remove any nodes we aren't ready to send to
         Iterator<Node> iter = result.readyNodes.iterator();
+        System.out.println("ready node from accumulator size="+result.readyNodes.size());
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
@@ -229,6 +232,7 @@ public class Sender implements Runnable {
         // with sendable data that aren't ready to send since they would cause busy looping.
         long pollTimeout = Math.min(result.nextReadyCheckDelayMs, notReadyTimeout);
         if (result.readyNodes.size() > 0) {
+            System.out.println("ready node for io ="+result.readyNodes +",produce requests:"+requests);
             log.trace("Nodes with data ready to send: {}", result.readyNodes);
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;

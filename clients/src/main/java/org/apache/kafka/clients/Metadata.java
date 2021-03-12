@@ -151,6 +151,8 @@ public final class Metadata {
      * Wait for metadata update until the current version is larger than the last version we know of
      */
     public synchronized void awaitUpdate(final int lastVersion, final long maxWaitMs) throws InterruptedException {
+        System.out.println("Metadata.awaitUpdate maxWaitMs=............."+maxWaitMs+",lastVersion="+lastVersion+"," +
+                "this.version="+this.version);
         if (maxWaitMs < 0) {
             throw new IllegalArgumentException("Max time to wait for metadata updates should not be < 0 milli seconds");
         }
