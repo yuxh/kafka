@@ -70,7 +70,7 @@ public final class RecordAccumulator {
     private final long retryBackoffMs;
     private final BufferPool free;
     private final Time time;
-    private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
+    private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batchesByTopicPartition;
     //未发送完成的RecordBatch集合，底层通过Set<RecordBatch> 实现
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
@@ -107,7 +107,7 @@ public final class RecordAccumulator {
         this.compression = compression;
         this.lingerMs = lingerMs;
         this.retryBackoffMs = retryBackoffMs;
-        this.batches = new CopyOnWriteMap<>();
+        this.batchesByTopicPartition = new CopyOnWriteMap<>();
         String metricGrpName = "producer-metrics";
         this.free = new BufferPool(totalSize, batchSize, metrics, time, metricGrpName);
         this.incomplete = new IncompleteRecordBatches();
@@ -269,7 +269,7 @@ public final class RecordAccumulator {
     public List<RecordBatch> abortExpiredBatches(int requestTimeout, long now) {
         List<RecordBatch> expiredBatches = new ArrayList<>();
         int count = 0;
-        for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
+        for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batchesByTopicPartition.entrySet()) {
             Deque<RecordBatch> dq = entry.getValue();
             TopicPartition tp = entry.getKey();
             // We only check if the batch should be expired if the partition does not have a batch in flight.
@@ -344,13 +344,15 @@ public final class RecordAccumulator {
         //记录可向哪些节点发送消息
         Set<Node> readyNodes = new HashSet<>();
         //记录下次需要调用ready的时间间隔
+        // 当KafkaProducer还没有调用send的时候，下面的deque为空(或者分区没有leader节点)，所以result中包含的nextReadyCheckDelayMs也是最大值，这个时候selector会一直阻塞。
+        //其他情况就要用linger.ms参数计算阻塞时间了
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
 //条件3：是否有线程在阻塞等待BufferPool 释放空间（即BufferPool的空间耗尽了）
         boolean exhausted = this.free.queued() > 0;
-        System.out.println("RecordAccumulator.ready ,topic count="+batches.size());
+        System.out.println("RecordAccumulator.ready ,TopicPartition count="+ batchesByTopicPartition.size());
         //遍历所有分区
-        for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
+        for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batchesByTopicPartition.entrySet()) {
             TopicPartition part = entry.getKey();
             Deque<RecordBatch> deque = entry.getValue();
 
@@ -381,10 +383,14 @@ public final class RecordAccumulator {
                         //条件1：Deque中有多个RecordBatch（第一个批次肯定写满了）或第一个RecordBatch已经满了
                         boolean full = deque.size() > 1 || batch.records.isFull();
                         boolean expired = waitedTimeMs >= timeToWaitMs;
-                        boolean sendable = full || expired || exhausted || closed || flushInProgress();
+                        boolean sendable = full || expired || exhausted
+                                || closed  // 4. producer 已经关闭
+                                || flushInProgress();// 5. 有线程正在等待 flush 操作完成，则需要立即投递消息，避免线程等待时间过长。
                         if (sendable && !backingOff) {
+                            // 允许发送消息，且当前为(首次发送，或者重试等待时间还未到)，则记录目标 leader 副本所在节点
                             readyNodes.add(leader);
                         } else {
+                            // 更新下次执行 ready 判定的时间间隔
                             // Note that this results in a conservative estimate since an un-sendable partition may have
                             // a leader that will later be found to have sendable data. However, this is good enough
                             // since we'll just wake up and then sleep again for the remaining time.
@@ -402,7 +408,7 @@ public final class RecordAccumulator {
      * @return Whether there is any unsent record in the accumulator.
      */
     public boolean hasUnsent() {
-        for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
+        for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batchesByTopicPartition.entrySet()) {
             Deque<RecordBatch> deque = entry.getValue();
             synchronized (deque) {
                 if (!deque.isEmpty())
@@ -432,7 +438,7 @@ public final class RecordAccumulator {
         if (nodes.isEmpty())
             return Collections.emptyMap();
 //转换后的结果
-        Map<Integer, List<RecordBatch>> batches = new HashMap<>();
+        Map<Integer, List<RecordBatch>> batchesByNode = new HashMap<>();
         //遍历指定的ready node集合
         for (Node node : nodes) {
             int size = 0;
@@ -478,25 +484,25 @@ public final class RecordAccumulator {
                 this.drainIndex = (this.drainIndex + 1) % parts.size();
                 //FIXME 如果drainIndex从0开始，parts是5个，正常5个遍历完之后跳出while。如果3的时候跳出了，下个节点从3开始？
             } while (start != drainIndex);
-            batches.put(node.id(), ready);
+            batchesByNode.put(node.id(), ready);
         }
-        return batches;
+        return batchesByNode;
     }
 
     private Deque<RecordBatch> getDeque(TopicPartition tp) {
-        return batches.get(tp);
+        return batchesByTopicPartition.get(tp);
     }
 
     /**
      * Get the deque for the given topic-partition, creating it if necessary.
      */
     private Deque<RecordBatch> getOrCreateDeque(TopicPartition tp) {
-        Deque<RecordBatch> d = this.batches.get(tp);
+        Deque<RecordBatch> d = this.batchesByTopicPartition.get(tp);
         if (d != null)
             return d;
         d = new ArrayDeque<>();
         //FIXME putIfAbsent有无必要？如果之前不存在 tp->null 这种键值对，put就行；如果存在，这个方法也不会把d放入进去
-        Deque<RecordBatch> previous = this.batches.putIfAbsent(tp, d);
+        Deque<RecordBatch> previous = this.batchesByTopicPartition.putIfAbsent(tp, d);
         if (previous == null)
             return d;
         else
@@ -522,7 +528,7 @@ public final class RecordAccumulator {
 
     /* Visible for testing */
     Map<TopicPartition, Deque<RecordBatch>> batches() {
-        return Collections.unmodifiableMap(batches);
+        return Collections.unmodifiableMap(batchesByTopicPartition);
     }
     
     /**
@@ -567,7 +573,7 @@ public final class RecordAccumulator {
         // flag set. We need to do the last abort after no thread was appending in case there was a new
         // batch appended by the last appending thread.
         abortBatches();
-        this.batches.clear();
+        this.batchesByTopicPartition.clear();
     }
 
     /**

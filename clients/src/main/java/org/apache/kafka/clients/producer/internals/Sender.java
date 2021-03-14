@@ -143,19 +143,25 @@ public class Sender implements Runnable {
         // okay we stopped accepting requests but there may still be
         // requests in the accumulator or waiting for acknowledgment,
         // wait until these are completed.
-        while (!forceClose && (this.accumulator.hasUnsent() || this.client.inFlightRequestCount() > 0)) {
+        /* 如果 KafkaProducer 被关闭，尝试发送剩余的消息 */
+        while (!forceClose // 不是强制关闭,一般都是调用 KafkaProducer#close 方法
+                // 存在未发送或已发送待响应的请求
+                && (this.accumulator.hasUnsent() || this.client.inFlightRequestCount() > 0)) {
             try {
                 run(time.milliseconds());
             } catch (Exception e) {
                 log.error("Uncaught error in kafka producer I/O thread: ", e);
             }
         }
+        //强制关闭（在调用 KafkaProducer#close 方法时允许指定超时等待时间，如果在既定时间内客户端仍未完成对缓存消息的处理，则会触发强制关闭机制）
         if (forceClose) {
             // We need to fail all the incomplete batches and wake up the threads waiting on
             // the futures.
+            // 丢弃所有未发送完成的消息
             this.accumulator.abortIncompleteBatches();
         }
         try {
+            // 关闭网络连接
             this.client.close();
         } catch (Exception e) {
             log.error("Failed to close network client", e);

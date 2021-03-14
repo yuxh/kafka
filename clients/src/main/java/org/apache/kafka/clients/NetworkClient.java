@@ -433,7 +433,7 @@ public class NetworkClient implements KafkaClient {
 
         // we disconnected, so we should probably refresh our metadata
         if (nodeIds.size() > 0)
-            metadataUpdater.requestUpdate();
+            metadataUpdater.requestUpdate();  //判定metadata失效
     }
 
     /**
@@ -471,7 +471,7 @@ public class NetworkClient implements KafkaClient {
             ClientRequest req = inFlightRequests.completeNext(source);
             //解析服务器发送回来的请求
             Struct body = parseResponse(receive.payload(), req.request().header());
-            //如果是关于元数据的响应
+            //下面这部分代码写得不“整洁”：maybeHandleCompletedReceive语义很模糊，实际上是在里面判断如果是元数据就处理并返回true,不是元数据直接范围false；后续版本进行了重构
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
                 responses.add(new ClientResponse(req, now, false, body));
         }
@@ -490,7 +490,7 @@ public class NetworkClient implements KafkaClient {
         }
         // we got a disconnect so we should probably refresh our metadata and see if that broker is dead
         if (this.selector.disconnected().size() > 0)
-            metadataUpdater.requestUpdate();
+            metadataUpdater.requestUpdate();  //判定metadata失效
     }
 
     /**
@@ -528,7 +528,7 @@ public class NetworkClient implements KafkaClient {
             /* attempt failed, we'll try again after the backoff */
             connectionStates.disconnected(nodeConnectionId, now);
             /* maybe the problem is our metadata, update it */
-            metadataUpdater.requestUpdate();
+            metadataUpdater.requestUpdate();//判定metadata失效
             log.debug("Error connecting to node {} at {}:{}:", node.id(), node.host(), node.port(), e);
         }
     }
@@ -563,7 +563,7 @@ public class NetworkClient implements KafkaClient {
         @Override
         public long maybeUpdate(long now) {
             // should we update our metadata?
-            // 获取下次更新集群信息的时间戳,会检查needUpdate的值、退避时间、是否长时间未更新
+            // 获取下次更新集群信息的时间戳,会检查needUpdate的值、退避时间（为避免频繁请求，默认至少间隔100ms）、是否失效（默认5分钟）
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
             long timeToNextReconnectAttempt = Math.max(this.lastNoNodeAvailableMs + metadata.refreshBackoff() - now, 0);
             // 检查是否已经发送了 MetadataRequest 请求
@@ -607,6 +607,7 @@ public class NetworkClient implements KafkaClient {
         public boolean maybeHandleCompletedReceive(ClientRequest req, long now, Struct body) {
             short apiKey = req.request().header().apiKey();
             if (apiKey == ApiKeys.METADATA.id && req.isInitiatedByNetworkClient()) {
+                //如果是关于元数据的响应
                 handleResponse(req.request().header(), body, now);
                 return true;
             }
@@ -632,6 +633,7 @@ public class NetworkClient implements KafkaClient {
             // don't update the cluster if there are no valid nodes...the topic we want may still be in the process of being
             // created which means we will get errors and no nodes until it exists
             if (cluster.nodes().size() > 0) {
+                //更新metadata。cluster是不可变的，用新的cluster覆盖旧的cluster
                 this.metadata.update(cluster, now);
             } else {
                 log.trace("Ignoring empty metadata response with correlation id {}.", header.correlationId());

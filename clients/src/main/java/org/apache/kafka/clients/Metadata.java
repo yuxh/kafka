@@ -49,12 +49,13 @@ public final class Metadata {
 
     public static final long TOPIC_EXPIRY_MS = 5 * 60 * 1000;
     private static final long TOPIC_EXPIRY_NEEDS_UPDATE = -1L;
-//两次更新元数据的请求的最小时间间隔，默认100ms。因为我们请求元数据的过程其实不是一定成功的，而请求不到元数据信息的话，那我们就找不到leader partition了
+//更新失败时,为了避免频繁更新元信息给服务端造成压力 ,最小的间隔时间，默认100ms。因为我们请求元数据的过程其实不是一定成功的，而请求不到元数据信息的话，那我们就找不到leader partition了
     private final long refreshBackoffMs;
     //每隔多久更新一次。默认五分钟
     private final long metadataExpireMs;
     //更新成功一次就加1
     private int version;
+    //最近一次更新时的时间（包含更新失败的情况）
     private long lastRefreshMs;
     private long lastSuccessfulRefreshMs;
     //记录kafka集群的元数据（最重要）
@@ -124,7 +125,9 @@ public final class Metadata {
      * is now
      */
     public synchronized long timeToNextUpdate(long nowMs) {
+        //在不强制更新的情况下，例如上次7点更新过元数据，现在7：03，还有2分钟就失效了（默认5分钟有效）
         long timeToExpire = needUpdate ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
+        //例如7：01去更新但失败了，100ms后可以重试了，现在7：03的话就是负数；如果现在7：05了，假如50ms前才尝试更新过，timeToAllowUpdate就是50，即使上面timeToExpire已经到期，也要再等50ms。
         long timeToAllowUpdate = this.lastRefreshMs + this.refreshBackoffMs - nowMs;
         return Math.max(timeToExpire, timeToAllowUpdate);
     }
@@ -252,7 +255,7 @@ public final class Metadata {
                 log.info("Cluster ID: {}", cluster.clusterResource().clusterId());
             clusterResourceListeners.onUpdate(cluster.clusterResource());
         }
-
+//通知所有的阻塞的producer线程
         notifyAll();
         log.debug("Updated cluster metadata version {} to {}", this.version, this.cluster);
     }
